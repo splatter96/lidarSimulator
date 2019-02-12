@@ -372,7 +372,7 @@ Vec3f castRay(
     Object *hitObject = nullptr;
     if (trace(orig, dir, objects, tnear, index, uv, &hitObject)) {
         Vec3f hitPoint = orig + dir * tnear;
-        printf("HIT: X: %.2f, Y: %.2f, Z: %.2f\n", hitPoint.x(), hitPoint.y(), hitPoint.z());
+        // printf("HIT: X: %.2f, Y: %.2f, Z: %.2f\n", hitPoint.x(), hitPoint.y(), hitPoint.z());
 
         //Vec3f hitNormal;
         //Vec2f hitTexCoordinates;
@@ -385,7 +385,8 @@ Vec3f castRay(
         //hitColor = c * NdotView; //Vec3f(uv.x, uv.y, 0);
 
         // hitColor = Vec3f(1.0, 0, 0);
-        hitColor = Vec3f(uv.x, uv.y, 0);
+        // hitColor = Vec3f(uv.x, uv.y, 0);
+        hitColor = Vec3f(hitPoint.x(), hitPoint.y(), hitPoint.z());
     }
 
     return hitColor;
@@ -422,18 +423,37 @@ void render(
     fprintf(stderr, "\rDone: %.2f (sec)\n", passedTime / 1000);
     
     // save framebuffer to file
-    char buff[256];
-    sprintf(buff, "out.%04d.ppm", frame);
+    // char buff[256];
+    // sprintf(buff, "out.%04d.ppm", frame);
+    // std::ofstream ofs;
+    // ofs.open(buff);
+    // ofs << "P6\n" << options.width << " " << options.height << "\n255\n";
+    // for (uint32_t i = 0; i < options.height * options.width; ++i) {
+    //     char r = (char)(255 * clamp(0, 1, framebuffer[i].x()));
+    //     char g = (char)(255 * clamp(0, 1, framebuffer[i].y()));
+    //     char b = (char)(255 * clamp(0, 1, framebuffer[i].z()));
+    //     ofs << r << g << b;
+    // }
+    // ofs.close();
+
     std::ofstream ofs;
-    ofs.open(buff);
-    ofs << "P6\n" << options.width << " " << options.height << "\n255\n";
+    ofs.open("plc_out.ply");
+    ofs << "ply\n"
+     << "format ascii 1.0\n"
+     << "element vertex " << options.height * options.width <<"\n"
+     << "property float32 x\n"
+     << "property float32 y\n"
+     << "property float32 z\n"
+     << "end_header\n";
+
     for (uint32_t i = 0; i < options.height * options.width; ++i) {
-        char r = (char)(255 * clamp(0, 1, framebuffer[i].x()));
-        char g = (char)(255 * clamp(0, 1, framebuffer[i].y()));
-        char b = (char)(255 * clamp(0, 1, framebuffer[i].z()));
-        ofs << r << g << b;
+        // char r = (char)(255 * clamp(0, 1, framebuffer[i].x()));
+        // char g = (char)(255 * clamp(0, 1, framebuffer[i].y()));
+        // char b = (char)(255 * clamp(0, 1, framebuffer[i].z()));
+        ofs << framebuffer[i].x() << " " << framebuffer[i].y()  << " " << framebuffer[i].z() << std::endl;
     }
     ofs.close();
+    
     
 }
 
@@ -454,9 +474,9 @@ int main(int argc, char **argv) {
     //TriangleMesh *mesh = loadPolyMeshFromFile("./cow.geo");
     // if (mesh != nullptr) objects.push_back(std::unique_ptr<Object>(mesh));
 
-    // TriangleMesh2* cowStl = parse_stl(std::string("cow.stl"));
+    TriangleMesh2* cowStl = parse_stl(std::string("cow.stl"));
     // TriangleMesh2* cowStl = parse_stl(std::string("twizy.stl"));
-    TriangleMesh2* cowStl = parse_stl(std::string("twizy_low_poly.stl"));
+    // TriangleMesh2* cowStl = parse_stl(std::string("twizy_low_poly.stl"));
     printf("Numtris %d\n", cowStl->triangles.size());
 
     objects.push_back(std::unique_ptr<Object>(cowStl));
