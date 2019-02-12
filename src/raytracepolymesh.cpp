@@ -450,7 +450,7 @@ int main(int argc, char **argv) {
     options.fov = 60;
 
     std::vector<std::unique_ptr<Object>> objects;
-    TriangleMesh *mesh = loadPolyMeshFromFile("./cow.geo");
+    //TriangleMesh *mesh = loadPolyMeshFromFile("./cow.geo");
     // if (mesh != nullptr) objects.push_back(std::unique_ptr<Object>(mesh));
 
     // TriangleMesh2* cowStl = parse_stl(std::string("cow.stl"));
