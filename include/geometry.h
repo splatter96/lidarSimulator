@@ -138,23 +138,22 @@ public:
 // Now you can specialize the class. We are just showing two examples here. In your code
 // you can declare a vector either that way: Vec3<float> a, or that way: Vec3f a
 //[/comment]
-typedef Vec3<float> Vec3f;
+// typedef Vec3<float> Vec3f;
 typedef Vec3<int> Vec3i;
 
 /**
  * Class to represent a single Triangle
  */
-template<typename T>
 class Triangle
 {
     public:
-        Triangle() : normal(T(0)), v1(T(0)), v2(T(0)), v3(T(0)) {}
-        Triangle(Vec3<T> normalp, Vec3<T> v1p, Vec3<T> v2p, Vec3<T> v3p) :
+        Triangle() : normal(tf::Vector3()), v1(tf::Vector3()), v2(tf::Vector3()), v3(tf::Vector3()) {}
+        Triangle(tf::Vector3 normalp, tf::Vector3 v1p, tf::Vector3 v2p, tf::Vector3 v3p) :
             normal(normalp), v1(v1p), v2(v2p), v3(v3p) {}
-        Vec3<T> normal;
-        Vec3<T> v1;
-        Vec3<T> v2;
-        Vec3<T> v3;
+        tf::Vector3 normal;
+        tf::Vector3 v1;
+        tf::Vector3 v2;
+        tf::Vector3 v3;
 };
 
 //[comment]

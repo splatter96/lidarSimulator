@@ -1,15 +1,7 @@
-//[header]
-// A simple program to demonstrate how to ray-trace a polygon mesh
-//[/header]
-//[compile]
-// Download the raytracepolygonmesh.cpp, geometry.h and cow.geo file to a folder.
-// Open a shell/terminal, and run the following command where the files is saved:
-//
-// c++ -o raytracepolymesh raytracepolymesh.cpp -std=c++11 -O3
-//
-// Run with: ./raytracepolygonmesh. Open the file ./out.0000.png in Photoshop or any program
-// reading PPM files.
-//[/compile]
+/**
+ * A Node which provides a service to generate a point cloud
+ * based on the stl objects provided
+ */
 
 #include <cstdio>
 #include <cstdlib>
@@ -23,7 +15,12 @@
 #include <sstream>
 #include <chrono>
 
+#include "ros/ros.h"
+#include <tf/transform_broadcaster.h>
+
 #include "geometry.h"
+
+typedef tf::Vector3 Vec3f;
 
 static const float kInfinity = std::numeric_limits<float>::max();
 static const float kEpsilon = 1e-8;
@@ -80,8 +77,8 @@ bool rayTriangleIntersect(
 {
     Vec3f v0v1 = v1 - v0;
     Vec3f v0v2 = v2 - v0;
-    Vec3f pvec = dir.crossProduct(v0v2);
-    float det = v0v1.dotProduct(pvec);
+    Vec3f pvec = dir.cross(v0v2);
+    float det = v0v1.dot(pvec);
 
     // ray and triangle are parallel if det is close to 0
     if (fabs(det) < kEpsilon) return false;
@@ -89,21 +86,21 @@ bool rayTriangleIntersect(
     float invDet = 1 / det;
 
     Vec3f tvec = orig - v0;
-    u = tvec.dotProduct(pvec) * invDet;
+    u = tvec.dot(pvec) * invDet;
     if (u < 0 || u > 1) return false;
 
-    Vec3f qvec = tvec.crossProduct(v0v1);
-    v = dir.dotProduct(qvec) * invDet;
+    Vec3f qvec = tvec.cross(v0v1);
+    v = dir.dot(qvec) * invDet;
     if (v < 0 || u + v > 1) return false;
     
-    t = v0v2.dotProduct(qvec) * invDet;
+    t = v0v2.dot(qvec) * invDet;
     
     return true;
 }
 
 class TriangleMesh2 : public Object{
     public:
-        TriangleMesh2(std::vector<Triangle<float>> tris):triangles(tris){}
+        TriangleMesh2(std::vector<Triangle> tris):triangles(tris){}
         bool intersect(const Vec3f &orig, const Vec3f &dir, float &tNear, uint32_t &triIndex, Vec2f &uv) const {
             bool isect = false;
             for (uint32_t i = 0; i < triangles.size(); ++i) {
@@ -130,14 +127,15 @@ class TriangleMesh2 : public Object{
         // const Vec3f &v0 = P[trisIndex[triIndex * 3]];
         // const Vec3f &v1 = P[trisIndex[triIndex * 3 + 1]];
         // const Vec3f &v2 = P[trisIndex[triIndex * 3 + 2]];
-        // hitNormal = (v1 - v0).crossProduct(v2 - v0);
+        // hitNormal = (v1 - v0).cross(v2 - v0);
         // hitNormal.normalize();
     }
 
         //Members
-        std::vector<Triangle<float>> triangles;
+        std::vector<Triangle> triangles;
 };
 
+/*
 class TriangleMesh : public Object
 {
 public:
@@ -235,7 +233,7 @@ public:
         const Vec3f &v0 = P[trisIndex[triIndex * 3]];
         const Vec3f &v1 = P[trisIndex[triIndex * 3 + 1]];
         const Vec3f &v2 = P[trisIndex[triIndex * 3 + 2]];
-        hitNormal = (v1 - v0).crossProduct(v2 - v0);
+        hitNormal = (v1 - v0).cross(v2 - v0);
         hitNormal.normalize();
         
         // texture coordinates
@@ -253,7 +251,9 @@ public:
     std::unique_ptr<Vec3f []> N;              // triangles vertex normals
     std::unique_ptr<Vec2f []> texCoordinates; // triangles texture coordinates
 };
+*/
 
+/*
 TriangleMesh* loadPolyMeshFromFile(const char *file)
 {
     std::ifstream ifs;
@@ -282,13 +282,13 @@ TriangleMesh* loadPolyMeshFromFile(const char *file)
         // reading vertices
         std::unique_ptr<Vec3f []> verts(new Vec3f[vertsArraySize]);
         for (uint32_t i = 0; i < vertsArraySize; ++i) {
-            ss >> verts[i].x >> verts[i].y >> verts[i].z;
+            ss >> verts[i].x() >> verts[i].y() >> verts[i].z();
             // printf("Vert X: %.2f Y: %.2f Z: %.2f\n", verts[i].x, verts[i].y, verts[i].z);
         }
         // reading normals
         std::unique_ptr<Vec3f []> normals(new Vec3f[vertsIndexArraySize]);
         for (uint32_t i = 0; i < vertsIndexArraySize; ++i) {
-            ss >> normals[i].x >> normals[i].y >> normals[i].z;
+            ss >> normals[i].x() >> normals[i].y() >> normals[i].z();
         }
         // reading st coordinates
         std::unique_ptr<Vec2f []> st(new Vec2f[vertsIndexArraySize]);
@@ -305,6 +305,7 @@ TriangleMesh* loadPolyMeshFromFile(const char *file)
     
     return nullptr;
 }
+*/
 
 TriangleMesh2* parse_stl(const std::string& stl_path) {
     std::ifstream stl_file(stl_path.c_str(), std::ios::in | std::ios::binary);
@@ -322,14 +323,14 @@ TriangleMesh2* parse_stl(const std::string& stl_path) {
 
     unsigned int* r = (unsigned int*) n_triangles;
     unsigned int num_triangles = *r;
-    std::vector<Triangle<float>> tris(num_triangles);
+    std::vector<Triangle> tris(num_triangles);
 
     for (unsigned int i = 0; i < num_triangles; i++) {
       auto normal = parse_point(stl_file);
       auto v1 = parse_point(stl_file);
       auto v2 = parse_point(stl_file);
       auto v3 = parse_point(stl_file);
-      tris[i] = Triangle<float>(normal, v1, v2, v3);
+      tris[i] = Triangle(normal, v1, v2, v3);
 
       char dummy[2];
       stl_file.read(dummy, 2);
@@ -371,12 +372,12 @@ Vec3f castRay(
     Object *hitObject = nullptr;
     if (trace(orig, dir, objects, tnear, index, uv, &hitObject)) {
         Vec3f hitPoint = orig + dir * tnear;
-        // printf("HIT: X: %.2f, Y: %.2f, Z: %.2f\n", hitPoint.x, hitPoint.y, hitPoint.z);
+        printf("HIT: X: %.2f, Y: %.2f, Z: %.2f\n", hitPoint.x(), hitPoint.y(), hitPoint.z());
 
         //Vec3f hitNormal;
         //Vec2f hitTexCoordinates;
         //hitObject->getSurfaceProperties(hitPoint, dir, index, uv, hitNormal, hitTexCoordinates);
-        //float NdotView = std::max(0.f, hitNormal.dotProduct(-dir));
+        //float NdotView = std::max(0.f, hitNormal.dot(-dir));
         //const int M = 10;
         //float checker = (fmod(hitTexCoordinates.x * M, 1.0) > 0.5) ^ (fmod(hitTexCoordinates.y * M, 1.0) < 0.5);
         //float c = 0.3 * (1 - checker) + 0.7 * checker;
@@ -399,7 +400,7 @@ void render(
     Vec3f *pix = framebuffer.get();
     float scale = tan(deg2rad(options.fov * 0.5));
     float imageAspectRatio = options.width / (float)options.height;
-    Vec3f orig;
+    Vec3f orig(0, 0, 0);
     // options.cameraToWorld.multVecMatrix(Vec3f(0), orig);
     auto timeStart = std::chrono::high_resolution_clock::now();
     for (uint32_t j = 0; j < options.height; ++j) {
@@ -408,14 +409,14 @@ void render(
             // generate primary ray direction
             float x = (2 * (i + 0.5) / (float)options.width - 1) * imageAspectRatio * scale;
             float y = (1 - 2 * (j + 0.5) / (float)options.height) * scale;
-            // Vec3f dir;
             // options.cameraToWorld.multDirMatrix(Vec3f(x, y, -1), dir);
-            Vec3f dir(x, y, -1);
-            dir.normalize();
+            Vec3f dir = Vec3f(x, y, -1).normalized();
+
             pix[i+j*options.width] = castRay(orig, dir, objects, options);
         }
-        fprintf(stderr, "\r%3d%c", uint32_t(j / (float)options.height * 100), '%');
+        // fprintf(stderr, "\r%3d%c", uint32_t(j / (float)options.height * 100), '%');
     }
+
     auto timeEnd = std::chrono::high_resolution_clock::now();
     auto passedTime = std::chrono::duration<double, std::milli>(timeEnd - timeStart).count();
     fprintf(stderr, "\rDone: %.2f (sec)\n", passedTime / 1000);
@@ -427,9 +428,9 @@ void render(
     ofs.open(buff);
     ofs << "P6\n" << options.width << " " << options.height << "\n255\n";
     for (uint32_t i = 0; i < options.height * options.width; ++i) {
-        char r = (char)(255 * clamp(0, 1, framebuffer[i].x));
-        char g = (char)(255 * clamp(0, 1, framebuffer[i].y));
-        char b = (char)(255 * clamp(0, 1, framebuffer[i].z));
+        char r = (char)(255 * clamp(0, 1, framebuffer[i].x()));
+        char g = (char)(255 * clamp(0, 1, framebuffer[i].y()));
+        char b = (char)(255 * clamp(0, 1, framebuffer[i].z()));
         ofs << r << g << b;
     }
     ofs.close();
@@ -454,8 +455,8 @@ int main(int argc, char **argv) {
     // if (mesh != nullptr) objects.push_back(std::unique_ptr<Object>(mesh));
 
     // TriangleMesh2* cowStl = parse_stl(std::string("cow.stl"));
-    TriangleMesh2* cowStl = parse_stl(std::string("twizy.stl"));
-    // TriangleMesh2* cowStl = parse_stl(std::string("twizy_low_poly.stl"));
+    // TriangleMesh2* cowStl = parse_stl(std::string("twizy.stl"));
+    TriangleMesh2* cowStl = parse_stl(std::string("twizy_low_poly.stl"));
     printf("Numtris %d\n", cowStl->triangles.size());
 
     objects.push_back(std::unique_ptr<Object>(cowStl));

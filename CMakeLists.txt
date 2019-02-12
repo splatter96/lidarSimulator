@@ -48,8 +48,8 @@ target_link_libraries(
   ${catkin_LIBRARIES}
 )
 
-set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS}  -Wall -Wextra -O3")
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS}  -Wall -Wextra -O3")
+set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -O3")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3")
 
 if (OPENMP_FOUND)
    set (CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${OpenMP_C_FLAGS}")
