@@ -1,0 +1,6 @@
+.vscode/*
+build/*
+*.png
+raytracepolymesh
+*.ppm
+
