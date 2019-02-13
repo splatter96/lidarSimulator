@@ -24,13 +24,11 @@ typedef tf::Vector3 Vec3f;
 
 static const float kInfinity = std::numeric_limits<float>::max();
 static const float kEpsilon = 1e-8;
-static const Vec3f kDefaultBackgroundColor = Vec3f(0.235294, 0.67451, 0.843137);
+static const Vec3f kDefaultBackgroundColor = Vec3f(0.0, 0.0, 0.0);
 
-inline float clamp(const float &lo, const float &hi, const float &v)
-{ return std::max(lo, std::min(hi, v)); }
-
-inline float deg2rad(const float &deg)
-{ return deg * M_PI / 180; }
+inline float deg2rad(const float &deg) {
+     return deg * M_PI / 180;
+}
 
 float parse_float(std::ifstream& s) {
    char f_buf[sizeof(float)];
@@ -52,13 +50,11 @@ float parse_float(std::ifstream& s) {
 
 struct Options
 {
-    uint32_t width = 640;
-    uint32_t height = 480;
-    // uint32_t width = 1920;
-    // uint32_t height = 1080;
-    float fov = 90;
     Vec3f backgroundColor = kDefaultBackgroundColor;
-    Matrix44f cameraToWorld;
+    uint32_t horizontalBeams = 3600;
+    uint32_t verticalBeams = 16;
+    float horizontalResolution = 0.1;
+    float verticalResolution = 2.0;
 };
 
 class Object
@@ -109,7 +105,7 @@ class TriangleMesh2 : public Object{
                 const Vec3f &v2 = triangles[i].v3;
 
                 float t = kInfinity, u, v;
-                    if (rayTriangleIntersect(orig, dir, v0, v1, v2, t, u, v) && t < tNear) {
+                if (rayTriangleIntersect(orig, dir, v0, v1, v2, t, u, v) && fabs(t) < fabs(tNear)) {
                     tNear = t;
                     uv.x = u;
                     uv.y = v;
@@ -311,7 +307,7 @@ TriangleMesh2* parse_stl(const std::string& stl_path) {
     std::ifstream stl_file(stl_path.c_str(), std::ios::in | std::ios::binary);
 
     if (!stl_file) {
-      std::cout << "ERROR: COULD NOT READ FILE" << std::endl;
+      std::cout << "ERROR: COULD NOT READ STL FILE" << std::endl;
       exit(1);
     }
 
@@ -372,48 +368,32 @@ Vec3f castRay(
     Object *hitObject = nullptr;
     if (trace(orig, dir, objects, tnear, index, uv, &hitObject)) {
         Vec3f hitPoint = orig + dir * tnear;
-        // printf("HIT: X: %.2f, Y: %.2f, Z: %.2f\n", hitPoint.x(), hitPoint.y(), hitPoint.z());
 
-        //Vec3f hitNormal;
-        //Vec2f hitTexCoordinates;
-        //hitObject->getSurfaceProperties(hitPoint, dir, index, uv, hitNormal, hitTexCoordinates);
-        //float NdotView = std::max(0.f, hitNormal.dot(-dir));
-        //const int M = 10;
-        //float checker = (fmod(hitTexCoordinates.x * M, 1.0) > 0.5) ^ (fmod(hitTexCoordinates.y * M, 1.0) < 0.5);
-        //float c = 0.3 * (1 - checker) + 0.7 * checker;
-        
-        //hitColor = c * NdotView; //Vec3f(uv.x, uv.y, 0);
-
-        // hitColor = Vec3f(1.0, 0, 0);
-        // hitColor = Vec3f(uv.x, uv.y, 0);
         hitColor = Vec3f(hitPoint.x(), hitPoint.y(), hitPoint.z());
     }
 
     return hitColor;
 }
 
-void render(
-    const Options &options,
-    const std::vector<std::unique_ptr<Object>> &objects,
-    const uint32_t &frame)
-{
-    std::unique_ptr<Vec3f []> framebuffer(new Vec3f[options.width * options.height]);
+void render(const Options &options, const std::vector<std::unique_ptr<Object>> &objects) {
+    std::unique_ptr<Vec3f []> framebuffer(new Vec3f[options.horizontalBeams * options.verticalBeams]);
     Vec3f *pix = framebuffer.get();
-    float scale = tan(deg2rad(options.fov * 0.5));
-    float imageAspectRatio = options.width / (float)options.height;
     Vec3f orig(0, 0, 0);
-    // options.cameraToWorld.multVecMatrix(Vec3f(0), orig);
-    auto timeStart = std::chrono::high_resolution_clock::now();
-    for (uint32_t j = 0; j < options.height; ++j) {
-#pragma omp parallel for
-        for (uint32_t i = 0; i < options.width; ++i) {
-            // generate primary ray direction
-            float x = (2 * (i + 0.5) / (float)options.width - 1) * imageAspectRatio * scale;
-            float y = (1 - 2 * (j + 0.5) / (float)options.height) * scale;
-            // options.cameraToWorld.multDirMatrix(Vec3f(x, y, -1), dir);
-            Vec3f dir = Vec3f(x, y, -1).normalized();
 
-            pix[i+j*options.width] = castRay(orig, dir, objects, options);
+    auto timeStart = std::chrono::high_resolution_clock::now();
+
+    for (uint32_t j = 0; j < options.horizontalBeams; ++j) {
+        #pragma omp parallel for
+        for (uint32_t i = 0; i < options.verticalBeams; ++i) {
+            // generate primary ray direction
+            float vert = i - options.verticalBeams/2.0;
+            float x = cos(deg2rad((float)j * options.horizontalResolution)) * cos(deg2rad(vert * options.verticalResolution));
+            float z = sin(deg2rad((float)j * options.horizontalResolution)) * cos(deg2rad(vert * options.verticalResolution));
+            float y = sin(deg2rad(vert * options.verticalResolution));
+
+            Vec3f dir = Vec3f(x, y, z).normalize();
+
+            pix[i+j*options.verticalBeams] = castRay(orig, dir, objects, options);
         }
         // fprintf(stderr, "\r%3d%c", uint32_t(j / (float)options.height * 100), '%');
     }
@@ -422,66 +402,37 @@ void render(
     auto passedTime = std::chrono::duration<double, std::milli>(timeEnd - timeStart).count();
     fprintf(stderr, "\rDone: %.2f (sec)\n", passedTime / 1000);
     
-    // save framebuffer to file
-    // char buff[256];
-    // sprintf(buff, "out.%04d.ppm", frame);
-    // std::ofstream ofs;
-    // ofs.open(buff);
-    // ofs << "P6\n" << options.width << " " << options.height << "\n255\n";
-    // for (uint32_t i = 0; i < options.height * options.width; ++i) {
-    //     char r = (char)(255 * clamp(0, 1, framebuffer[i].x()));
-    //     char g = (char)(255 * clamp(0, 1, framebuffer[i].y()));
-    //     char b = (char)(255 * clamp(0, 1, framebuffer[i].z()));
-    //     ofs << r << g << b;
-    // }
-    // ofs.close();
-
+    // save pointcloud to file
     std::ofstream ofs;
     ofs.open("plc_out.ply");
     ofs << "ply\n"
      << "format ascii 1.0\n"
-     << "element vertex " << options.height * options.width <<"\n"
+     << "element vertex " << options.horizontalBeams * options.verticalBeams <<"\n"
      << "property float32 x\n"
      << "property float32 y\n"
      << "property float32 z\n"
      << "end_header\n";
 
-    for (uint32_t i = 0; i < options.height * options.width; ++i) {
-        // char r = (char)(255 * clamp(0, 1, framebuffer[i].x()));
-        // char g = (char)(255 * clamp(0, 1, framebuffer[i].y()));
-        // char b = (char)(255 * clamp(0, 1, framebuffer[i].z()));
+    for (uint32_t i = 0; i < options.horizontalBeams * options.verticalBeams; ++i) {
         ofs << framebuffer[i].x() << " " << framebuffer[i].y()  << " " << framebuffer[i].z() << std::endl;
     }
     ofs.close();
-    
     
 }
 
 int main(int argc, char **argv) {
     Options options;
-    // Matrix44f tmp = Matrix44f(0.707107, -0.331295,   0.624695, 0,
-    //                                  0,  0.883452,   0.468521, 0,
-    //                          -0.707107, -0.331295,   0.624695, 0,
-    //                           -7.63871, 0.747777, -10.400412, 1);
-    Matrix44f tmp = Matrix44f(1.0, 0.0,  0.0, 0,
-                              0.0, 1.0,  0.0, 0,
-                              0.0, 0.0, 1.0, 0,
-                              -0.0, 0.0, 0.0, 1);
-    options.cameraToWorld = tmp.inverse();
-    options.fov = 60;
 
     std::vector<std::unique_ptr<Object>> objects;
-    //TriangleMesh *mesh = loadPolyMeshFromFile("./cow.geo");
-    // if (mesh != nullptr) objects.push_back(std::unique_ptr<Object>(mesh));
 
     TriangleMesh2* cowStl = parse_stl(std::string("cow.stl"));
     // TriangleMesh2* cowStl = parse_stl(std::string("twizy.stl"));
+    // TriangleMesh2* cowStl = parse_stl(std::string("qube.stl"));
     // TriangleMesh2* cowStl = parse_stl(std::string("twizy_low_poly.stl"));
-    printf("Numtris %d\n", cowStl->triangles.size());
 
     objects.push_back(std::unique_ptr<Object>(cowStl));
 
     // finally, render
-    render(options, objects, 0);
+    render(options, objects);
     return 0;
 }
