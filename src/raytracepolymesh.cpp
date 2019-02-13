@@ -37,12 +37,9 @@ float parse_float(std::ifstream& s) {
  }
 
  Vec3f parse_point(std::ifstream& s) {
-    float offset_x = 0;
-    float offset_y = 0;
-    float offset_z = -3;
-    float x = parse_float(s)/100.f + offset_x;
-    float y = parse_float(s)/100.f + offset_y;
-    float z = parse_float(s)/100.f + offset_z;
+    float x = parse_float(s)/100.f;
+    float y = parse_float(s)/100.f;
+    float z = parse_float(s)/100.f;
     return Vec3f(x, y, z);
  }
 
@@ -94,13 +91,13 @@ bool rayTriangleIntersect(
 
 class TriangleMesh2 : public Object{
     public:
-        TriangleMesh2(std::vector<Triangle> tris):triangles(tris){}
+        TriangleMesh2(std::vector<Triangle> tris):triangles(tris), offset(Vec3f(0, 0, 0)){}
         bool intersect(const Vec3f &orig, const Vec3f &dir, float &tNear, uint32_t &triIndex, Vec2f &uv) const {
             bool isect = false;
             for (uint32_t i = 0; i < triangles.size(); ++i) {
-                const Vec3f &v0 = triangles[i].v1;
-                const Vec3f &v1 = triangles[i].v2;
-                const Vec3f &v2 = triangles[i].v3;
+                const Vec3f &v0 = triangles[i].v1 + offset;
+                const Vec3f &v1 = triangles[i].v2 + offset;
+                const Vec3f &v2 = triangles[i].v3 + offset;
 
                 float t = kInfinity, u, v;
                 if (rayTriangleIntersect(orig, dir, v0, v1, v2, t, u, v) && fabs(t) < fabs(tNear)) {
@@ -125,8 +122,24 @@ class TriangleMesh2 : public Object{
         // hitNormal.normalize();
     }
 
+    /**
+     * Offset each triangles vertices by the specified vector
+     */
+    void setOffset(Vec3f off){
+        this->offset = off;
+        for (uint32_t i = 0; i < triangles.size(); ++i) {
+            auto v0 = triangles[i].v1 + offset;
+            auto v1 = triangles[i].v2 + offset;
+            auto v2 = triangles[i].v3 + offset;
+            auto normal = triangles[i].normal;
+            triangles[i] = Triangle(normal, v0, v1, v2);
+        }
+    }
+
         //Members
         std::vector<Triangle> triangles;
+    private:
+        Vec3f offset;
 };
 
 /*
@@ -416,9 +429,10 @@ int main(int argc, char **argv) {
 
     // TriangleMesh2* cowStl = parse_stl(std::string("cow.stl"));
     // TriangleMesh2* cowStl = parse_stl(std::string("twizy.stl"));
-    TriangleMesh2* cowStl = parse_stl(std::string("qube.stl"));
-    // TriangleMesh2* cowStl = parse_stl(std::string("twizy_low_poly.stl"));
+    // TriangleMesh2* cowStl = parse_stl(std::string("qube.stl"));
+    TriangleMesh2* cowStl = parse_stl(std::string("twizy_low_poly.stl"));
 
+    cowStl->setOffset(Vec3f(0.0, 0.0, -2));
     objects.push_back(std::unique_ptr<Object>(cowStl));
 
     // finally, render
