@@ -13,6 +13,8 @@ The original raytracing code can be found under [tinytracer](https://github.com/
 - [x] Use ROS/tf vectos and point objects
 - [x] Export hit points instead of image
 - [x] Form rays according to LiDAR scanner instead of pixelwise
+- [ ] Moveable objects (Offset from LiDAR)
+- [ ] Calculate Intensities
 - [ ] Use same coordinate system for everything (Z pointing to sky, Y pointing out of screen)
 - [ ] Expose a ROS action or actionLib server
 - [ ] Performance optimizations

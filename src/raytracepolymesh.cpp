@@ -24,7 +24,6 @@ typedef tf::Vector3 Vec3f;
 
 static const float kInfinity = std::numeric_limits<float>::max();
 static const float kEpsilon = 1e-8;
-static const Vec3f kDefaultBackgroundColor = Vec3f(0.0, 0.0, 0.0);
 
 inline float deg2rad(const float &deg) {
      return deg * M_PI / 180;
@@ -50,7 +49,6 @@ float parse_float(std::ifstream& s) {
 
 struct Options
 {
-    Vec3f backgroundColor = kDefaultBackgroundColor;
     uint32_t horizontalBeams = 3600;
     uint32_t verticalBeams = 16;
     float horizontalResolution = 0.1;
@@ -356,27 +354,9 @@ bool trace(
     return (*hitObject != nullptr);
 }
 
-Vec3f castRay(
-    const Vec3f &orig, const Vec3f &dir,
-    const std::vector<std::unique_ptr<Object>> &objects,
-    const Options &options)
-{
-    Vec3f hitColor = options.backgroundColor;
-    float tnear = kInfinity;
-    Vec2f uv;
-    uint32_t index = 0;
-    Object *hitObject = nullptr;
-    if (trace(orig, dir, objects, tnear, index, uv, &hitObject)) {
-        Vec3f hitPoint = orig + dir * tnear;
-
-        hitColor = Vec3f(hitPoint.x(), hitPoint.y(), hitPoint.z());
-    }
-
-    return hitColor;
-}
-
 void render(const Options &options, const std::vector<std::unique_ptr<Object>> &objects) {
     std::unique_ptr<Vec3f []> framebuffer(new Vec3f[options.horizontalBeams * options.verticalBeams]);
+    int hitCnt = 0;
     Vec3f *pix = framebuffer.get();
     Vec3f orig(0, 0, 0);
 
@@ -393,7 +373,16 @@ void render(const Options &options, const std::vector<std::unique_ptr<Object>> &
 
             Vec3f dir = Vec3f(x, y, z).normalize();
 
-            pix[i+j*options.verticalBeams] = castRay(orig, dir, objects, options);
+            float tnear = kInfinity;
+            Vec2f uv;
+            uint32_t index = 0;
+            Object *hitObject = nullptr;
+            if (trace(orig, dir, objects, tnear, index, uv, &hitObject)) {
+                Vec3f hitPoint = orig + dir * tnear;
+
+                pix[hitCnt] = Vec3f(hitPoint.x(), hitPoint.y(), hitPoint.z());
+                hitCnt++;
+            }
         }
         // fprintf(stderr, "\r%3d%c", uint32_t(j / (float)options.height * 100), '%');
     }
@@ -407,13 +396,13 @@ void render(const Options &options, const std::vector<std::unique_ptr<Object>> &
     ofs.open("plc_out.ply");
     ofs << "ply\n"
      << "format ascii 1.0\n"
-     << "element vertex " << options.horizontalBeams * options.verticalBeams <<"\n"
+     << "element vertex " << hitCnt <<"\n"
      << "property float32 x\n"
      << "property float32 y\n"
      << "property float32 z\n"
      << "end_header\n";
 
-    for (uint32_t i = 0; i < options.horizontalBeams * options.verticalBeams; ++i) {
+    for (uint32_t i = 0; i < hitCnt; ++i) {
         ofs << framebuffer[i].x() << " " << framebuffer[i].y()  << " " << framebuffer[i].z() << std::endl;
     }
     ofs.close();
@@ -425,9 +414,9 @@ int main(int argc, char **argv) {
 
     std::vector<std::unique_ptr<Object>> objects;
 
-    TriangleMesh2* cowStl = parse_stl(std::string("cow.stl"));
+    // TriangleMesh2* cowStl = parse_stl(std::string("cow.stl"));
     // TriangleMesh2* cowStl = parse_stl(std::string("twizy.stl"));
-    // TriangleMesh2* cowStl = parse_stl(std::string("qube.stl"));
+    TriangleMesh2* cowStl = parse_stl(std::string("qube.stl"));
     // TriangleMesh2* cowStl = parse_stl(std::string("twizy_low_poly.stl"));
 
     objects.push_back(std::unique_ptr<Object>(cowStl));
