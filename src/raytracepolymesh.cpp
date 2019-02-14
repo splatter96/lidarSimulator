@@ -10,7 +10,9 @@
 #include <chrono>
 
 #include "ros/ros.h"
-#include <tf/transform_broadcaster.h>
+#include <resource_retriever/retriever.h>
+#include <tf/transform_datatypes.h>
+#include "lidarSimulator/LiDARSimulation.h"
 
 #include "visualization_msgs/Marker.h"
 #include "std_msgs/Header.h"
@@ -25,6 +27,9 @@ static const float kEpsilon = 1e-8;
 
 ros::Publisher cloudPub;
 
+resource_retriever::Retriever r;
+resource_retriever::MemoryResource resource;
+
 inline float deg2rad(const float &deg) {
      return deg * M_PI / 180;
 }
@@ -36,10 +41,26 @@ float parse_float(std::ifstream& s) {
    return *fptr;
  }
 
+ float parse_float(uint8_t* data, int offset){
+   char f_buf[sizeof(float)];
+//    s.read(f_buf, 4);
+   std::copy(data + offset, data + offset + 4, f_buf);
+   float* fptr = (float*) f_buf;
+   return *fptr;
+ }
+
  Vec3f parse_point(std::ifstream& s) {
-    float x = parse_float(s)/100.f;
-    float y = parse_float(s)/100.f;
-    float z = parse_float(s)/100.f;
+    float x = parse_float(s);
+    float y = parse_float(s);
+    float z = parse_float(s);
+    return Vec3f(x, y, z);
+ }
+
+ Vec3f parse_point(uint8_t* data, int* offset){
+    float x = parse_float(data, *offset);
+    float y = parse_float(data, *offset+4);
+    float z = parse_float(data, *offset+8);
+    *offset += 12;
     return Vec3f(x, y, z);
  }
 
@@ -136,10 +157,23 @@ class TriangleMesh2 : public Object{
         }
     }
 
+    void setScale(Vec3f scale){
+        this->scale = scale;
+
+        for (uint32_t i = 0; i < triangles.size(); ++i) {
+            auto v0 = triangles[i].v1 * scale;
+            auto v1 = triangles[i].v2 * scale;
+            auto v2 = triangles[i].v3 * scale;
+            auto normal = triangles[i].normal;
+            triangles[i] = Triangle(normal, v0, v1, v2);
+        }
+    }
+
         //Members
         std::vector<Triangle> triangles;
     private:
         Vec3f offset;
+        Vec3f scale;
 };
 
 /*
@@ -314,6 +348,31 @@ TriangleMesh* loadPolyMeshFromFile(const char *file)
 }
 */
 
+TriangleMesh2* parse_stl(uint8_t* data, uint32_t size) {
+    char n_triangles[4];
+    
+    // skip over header information and read the number of triangles
+    std::copy(data + 80, data + 84, n_triangles);
+    int offset = 84;
+
+    unsigned int* r = (unsigned int*) n_triangles;
+    unsigned int num_triangles = *r;
+    std::vector<Triangle> tris(num_triangles);
+
+    for (unsigned int i = 0; i < num_triangles; i++) {
+      auto normal = parse_point(data, &offset);
+      auto v1 = parse_point(data, &offset);
+      auto v2 = parse_point(data, &offset);
+      auto v3 = parse_point(data, &offset);
+      tris[i] = Triangle(normal, v1, v2, v3);
+
+      // skip over the 2 'attribute bytes'
+      offset += 2;
+    }
+
+    return new TriangleMesh2(tris);
+}
+
 TriangleMesh2* parse_stl(const std::string& stl_path) {
     std::ifstream stl_file(stl_path.c_str(), std::ios::in | std::ios::binary);
 
@@ -367,10 +426,9 @@ bool trace(
     return (*hitObject != nullptr);
 }
 
-void render(const Options &options, const std::vector<std::unique_ptr<Object>> &objects) {
-    std::unique_ptr<Vec3f []> framebuffer(new Vec3f[options.horizontalBeams * options.verticalBeams]);
+std::vector<Vec3f> render(const Options &options, const std::vector<std::unique_ptr<Object>> &objects) {
+    std::vector<Vec3f> pointList(options.horizontalBeams * options.verticalBeams);
     int hitCnt = 0;
-    Vec3f *pix = framebuffer.get();
     Vec3f orig(0, 0, 0);
 
     auto timeStart = std::chrono::high_resolution_clock::now();
@@ -393,7 +451,7 @@ void render(const Options &options, const std::vector<std::unique_ptr<Object>> &
             if (trace(orig, dir, objects, tnear, index, uv, &hitObject)) {
                 Vec3f hitPoint = orig + dir * tnear;
 
-                pix[hitCnt] = Vec3f(hitPoint.x(), hitPoint.y(), hitPoint.z());
+                pointList[hitCnt] = Vec3f(hitPoint.x(), hitPoint.y(), hitPoint.z());
                 hitCnt++;
             }
         }
@@ -403,6 +461,51 @@ void render(const Options &options, const std::vector<std::unique_ptr<Object>> &
     auto timeEnd = std::chrono::high_resolution_clock::now();
     auto passedTime = std::chrono::duration<double, std::milli>(timeEnd - timeStart).count();
     fprintf(stderr, "\rDone: %.2f (sec)\n", passedTime / 1000);
+
+    pointList.resize(hitCnt);
+    return pointList;
+}
+
+bool simulate(lidarSimulator::LiDARSimulationRequest  &req, lidarSimulator::LiDARSimulationResponse &res) {
+    ROS_INFO("Got Request");
+    Options options;
+
+    options.horizontalBeams = req.scanner.horizontalBeams;
+    options.verticalBeams = req.scanner.verticalBeams;
+    options.horizontalResolution = req.scanner.horizontalResolution;
+    options.verticalResolution = req.scanner.verticalResolution;
+
+    std::vector<std::unique_ptr<Object>> objects;
+
+    try {
+        resource = r.get(req.object); 
+    } catch (resource_retriever::Exception& e) {
+        ROS_ERROR("Failed to retrieve file: %s", e.what());
+        return false;
+    }
+
+    uint8_t* r_data = resource.data.get();
+    TriangleMesh2* object = parse_stl(resource.data.get(), resource.size);
+
+    // TriangleMesh2* object = parse_stl(std::string("cow.stl"));
+    // TriangleMesh2* object = parse_stl(std::string("twizy.stl"));
+    TriangleMesh2* object2 = parse_stl(std::string("qube.stl"));
+    // TriangleMesh2* object = parse_stl(std::string("twizy_low_poly.stl"));
+
+    object2->setOffset(Vec3f(0, 0, 3));
+    object2->setScale(Vec3f(0.01, 0.01, 0.01));
+
+    Vec3f offset;
+    Vec3f scale;
+    tf::pointMsgToTF(req.pose.position, offset);
+    tf::vector3MsgToTF(req.scale, scale);
+    object->setOffset(offset);
+    object->setScale(scale);
+
+    objects.push_back(std::unique_ptr<Object>(object));
+    objects.push_back(std::unique_ptr<Object>(object2));
+
+    auto pointList = render(options, objects);
 
     visualization_msgs::Marker cloud;
     cloud.header.frame_id = "origin";
@@ -416,11 +519,11 @@ void render(const Options &options, const std::vector<std::unique_ptr<Object>> &
     cloud.color.b = 0;
 
     std::vector<geometry_msgs::Point> cloud_points;
-    for(uint32_t i = 0; i < hitCnt; i++){
+    for(uint32_t i = 0; i < pointList.size(); i++){
         geometry_msgs::Point tmp;
-        tmp.x = framebuffer[i].x();
-        tmp.y = -framebuffer[i].z();
-        tmp.z = framebuffer[i].y();
+        tmp.x = pointList[i].x();
+        tmp.y = -pointList[i].z();
+        tmp.z = pointList[i].y();
 
         cloud_points.push_back(tmp);
     }
@@ -428,23 +531,29 @@ void render(const Options &options, const std::vector<std::unique_ptr<Object>> &
     cloud.points = cloud_points;
 
     cloudPub.publish(cloud);
-    
-    // save pointcloud to file
-    // std::ofstream ofs;
-    // ofs.open("plc_out.ply");
-    // ofs << "ply\n"
-    //  << "format ascii 1.0\n"
-    //  << "element vertex " << hitCnt <<"\n"
-    //  << "property float32 x\n"
-    //  << "property float32 y\n"
-    //  << "property float32 z\n"
-    //  << "end_header\n";
 
-    // for (uint32_t i = 0; i < hitCnt; ++i) {
-    //     ofs << framebuffer[i].x() << " " << framebuffer[i].y()  << " " << framebuffer[i].z() << std::endl;
-    // }
-    // ofs.close();
+    res.cloud = cloud;
     
+    return true;
+}
+
+void saveToFile(std::vector<Vec3f> pointList){
+    // save pointcloud to file
+    std::ofstream ofs;
+    ofs.open("plc_out.ply");
+    ofs << "ply\n"
+     << "format ascii 1.0\n"
+     << "element vertex " << pointList.size() <<"\n"
+     << "property float32 x\n"
+     << "property float32 y\n"
+     << "property float32 z\n"
+     << "end_header\n";
+
+    for (uint32_t i = 0; i < pointList.size(); ++i) {
+        ofs << pointList[i].x() << " " << pointList[i].y()  << " " << pointList[i].z() << std::endl;
+    }
+
+    ofs.close();
 }
 
 int main(int argc, char **argv) {
@@ -452,24 +561,10 @@ int main(int argc, char **argv) {
     ros::NodeHandle nh;
     cloudPub = nh.advertise<visualization_msgs::Marker>("/simMarker", 1);
 
-    Options options;
 
-    std::vector<std::unique_ptr<Object>> objects;
+    ros::ServiceServer service = nh.advertiseService("lidarSimulatorService", simulate);
 
-    // TriangleMesh2* cowStl = parse_stl(std::string("cow.stl"));
-    // TriangleMesh2* cowStl = parse_stl(std::string("twizy.stl"));
-    TriangleMesh2* cowStl = parse_stl(std::string("qube.stl"));
-    // TriangleMesh2* cowStl = parse_stl(std::string("twizy_low_poly.stl"));
-
-    cowStl->setOffset(Vec3f(0.0, 0.0, -2));
-    objects.push_back(std::unique_ptr<Object>(cowStl));
-
-    // finally, render
-    while(ros::ok()){
-        render(options, objects);
-        ros::spinOnce();
-        ros::Duration(5.0).sleep();
-    }
+    ros::spin();
 
     return 0;
 }

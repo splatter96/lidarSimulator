@@ -1,0 +1,8 @@
+# Srv describing the the parameters and response of the simulation
+
+lidarSimulator/LiDAR scanner
+string object # a resource path to the stl file describing the object
+geometry_msgs/Pose pose
+geometry_msgs/Vector3 scale
+---
+visualization_msgs/Marker cloud
