@@ -4,19 +4,17 @@
  */
 
 #include <cstdio>
-#include <cstdlib>
-#include <memory>
 #include <vector>
-#include <utility>
-#include <cstdint>
-#include <iostream>
 #include <fstream>
 #include <cmath>
-#include <sstream>
 #include <chrono>
 
 #include "ros/ros.h"
 #include <tf/transform_broadcaster.h>
+
+#include "visualization_msgs/Marker.h"
+#include "std_msgs/Header.h"
+#include "geometry_msgs/Point.h"
 
 #include "geometry.h"
 
@@ -24,6 +22,8 @@ typedef tf::Vector3 Vec3f;
 
 static const float kInfinity = std::numeric_limits<float>::max();
 static const float kEpsilon = 1e-8;
+
+ros::Publisher cloudPub;
 
 inline float deg2rad(const float &deg) {
      return deg * M_PI / 180;
@@ -403,39 +403,73 @@ void render(const Options &options, const std::vector<std::unique_ptr<Object>> &
     auto timeEnd = std::chrono::high_resolution_clock::now();
     auto passedTime = std::chrono::duration<double, std::milli>(timeEnd - timeStart).count();
     fprintf(stderr, "\rDone: %.2f (sec)\n", passedTime / 1000);
+
+    visualization_msgs::Marker cloud;
+    cloud.header.frame_id = "origin";
+    cloud.type = visualization_msgs::Marker::POINTS;
+    cloud.scale.x = 0.01;
+    cloud.scale.y = 0.01;
+    cloud.scale.z = 0.01;
+    cloud.color.a = 1;
+    cloud.color.r = 1;
+    cloud.color.g = 0;
+    cloud.color.b = 0;
+
+    std::vector<geometry_msgs::Point> cloud_points;
+    for(uint32_t i = 0; i < hitCnt; i++){
+        geometry_msgs::Point tmp;
+        tmp.x = framebuffer[i].x();
+        tmp.y = -framebuffer[i].z();
+        tmp.z = framebuffer[i].y();
+
+        cloud_points.push_back(tmp);
+    }
+
+    cloud.points = cloud_points;
+
+    cloudPub.publish(cloud);
     
     // save pointcloud to file
-    std::ofstream ofs;
-    ofs.open("plc_out.ply");
-    ofs << "ply\n"
-     << "format ascii 1.0\n"
-     << "element vertex " << hitCnt <<"\n"
-     << "property float32 x\n"
-     << "property float32 y\n"
-     << "property float32 z\n"
-     << "end_header\n";
+    // std::ofstream ofs;
+    // ofs.open("plc_out.ply");
+    // ofs << "ply\n"
+    //  << "format ascii 1.0\n"
+    //  << "element vertex " << hitCnt <<"\n"
+    //  << "property float32 x\n"
+    //  << "property float32 y\n"
+    //  << "property float32 z\n"
+    //  << "end_header\n";
 
-    for (uint32_t i = 0; i < hitCnt; ++i) {
-        ofs << framebuffer[i].x() << " " << framebuffer[i].y()  << " " << framebuffer[i].z() << std::endl;
-    }
-    ofs.close();
+    // for (uint32_t i = 0; i < hitCnt; ++i) {
+    //     ofs << framebuffer[i].x() << " " << framebuffer[i].y()  << " " << framebuffer[i].z() << std::endl;
+    // }
+    // ofs.close();
     
 }
 
 int main(int argc, char **argv) {
+    ros::init(argc, argv, "lidarSimulator");
+    ros::NodeHandle nh;
+    cloudPub = nh.advertise<visualization_msgs::Marker>("/simMarker", 1);
+
     Options options;
 
     std::vector<std::unique_ptr<Object>> objects;
 
     // TriangleMesh2* cowStl = parse_stl(std::string("cow.stl"));
     // TriangleMesh2* cowStl = parse_stl(std::string("twizy.stl"));
-    // TriangleMesh2* cowStl = parse_stl(std::string("qube.stl"));
-    TriangleMesh2* cowStl = parse_stl(std::string("twizy_low_poly.stl"));
+    TriangleMesh2* cowStl = parse_stl(std::string("qube.stl"));
+    // TriangleMesh2* cowStl = parse_stl(std::string("twizy_low_poly.stl"));
 
     cowStl->setOffset(Vec3f(0.0, 0.0, -2));
     objects.push_back(std::unique_ptr<Object>(cowStl));
 
     // finally, render
-    render(options, objects);
+    while(ros::ok()){
+        render(options, objects);
+        ros::spinOnce();
+        ros::Duration(5.0).sleep();
+    }
+
     return 0;
 }
