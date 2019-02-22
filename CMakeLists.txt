@@ -22,7 +22,7 @@ find_package(OpenMP)
 add_message_files(
   FILES
   LiDAR.msg
-##  SimulationRequest.msg
+  SimulationObject.msg
 )
 
 add_service_files(

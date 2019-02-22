@@ -28,7 +28,6 @@ static const float kEpsilon = 1e-8;
 ros::Publisher cloudPub;
 
 resource_retriever::Retriever r;
-resource_retriever::MemoryResource resource;
 
 inline float deg2rad(const float &deg) {
      return deg * M_PI / 180;
@@ -106,7 +105,8 @@ bool rayTriangleIntersect(
     if (v < 0 || u + v > 1) return false;
     
     t = v0v2.dot(qvec) * invDet;
-    
+    if(t < 0) return false;
+
     return true;
 }
 
@@ -121,7 +121,7 @@ class TriangleMesh2 : public Object{
                 const Vec3f &v2 = triangles[i].v3 + offset;
 
                 float t = kInfinity, u, v;
-                if (rayTriangleIntersect(orig, dir, v0, v1, v2, t, u, v) && fabs(t) < fabs(tNear)) {
+                if (rayTriangleIntersect(orig, dir, v0, v1, v2, t, u, v) && t < tNear) {
                     tNear = t;
                     uv.x = u;
                     uv.y = v;
@@ -442,7 +442,7 @@ std::vector<Vec3f> render(const Options &options, const std::vector<std::unique_
             float z = sin(deg2rad((float)j * options.horizontalResolution)) * cos(deg2rad(vert * options.verticalResolution));
             float y = sin(deg2rad(vert * options.verticalResolution));
 
-            Vec3f dir = Vec3f(x, y, z).normalize();
+            Vec3f dir = Vec3f(x, y, -z).normalize();
 
             float tnear = kInfinity;
             Vec2f uv;
@@ -467,7 +467,6 @@ std::vector<Vec3f> render(const Options &options, const std::vector<std::unique_
 }
 
 bool simulate(lidarSimulator::LiDARSimulationRequest  &req, lidarSimulator::LiDARSimulationResponse &res) {
-    ROS_INFO("Got Request");
     Options options;
 
     options.horizontalBeams = req.scanner.horizontalBeams;
@@ -475,37 +474,38 @@ bool simulate(lidarSimulator::LiDARSimulationRequest  &req, lidarSimulator::LiDA
     options.horizontalResolution = req.scanner.horizontalResolution;
     options.verticalResolution = req.scanner.verticalResolution;
 
-    std::vector<std::unique_ptr<Object>> objects;
-
-    try {
-        resource = r.get(req.object); 
-    } catch (resource_retriever::Exception& e) {
-        ROS_ERROR("Failed to retrieve file: %s", e.what());
-        return false;
-    }
-
-    uint8_t* r_data = resource.data.get();
-    TriangleMesh2* object = parse_stl(resource.data.get(), resource.size);
-
     // TriangleMesh2* object = parse_stl(std::string("cow.stl"));
     // TriangleMesh2* object = parse_stl(std::string("twizy.stl"));
-    TriangleMesh2* object2 = parse_stl(std::string("qube.stl"));
+    // TriangleMesh2* object2 = parse_stl(std::string("qube.stl"));
     // TriangleMesh2* object = parse_stl(std::string("twizy_low_poly.stl"));
 
-    object2->setOffset(Vec3f(0, 0, 3));
-    object2->setScale(Vec3f(0.01, 0.01, 0.01));
+    std::vector<std::unique_ptr<Object>> objects;
 
-    Vec3f offset;
-    Vec3f scale;
-    tf::pointMsgToTF(req.pose.position, offset);
-    tf::vector3MsgToTF(req.scale, scale);
-    object->setOffset(offset);
-    object->setScale(scale);
+    resource_retriever::MemoryResource resource;
+    for(auto object : req.objects){
+        try {
+            resource = r.get(object.object); 
+        } catch (resource_retriever::Exception& e) {
+            ROS_ERROR("Failed to retrieve file: %s", e.what());
+            return false;
+        }
 
-    objects.push_back(std::unique_ptr<Object>(object));
-    objects.push_back(std::unique_ptr<Object>(object2));
+        uint8_t* r_data = resource.data.get();
+        TriangleMesh2* triangleObject = parse_stl(resource.data.get(), resource.size);
+
+        Vec3f offset;
+        Vec3f scale;
+        tf::pointMsgToTF(object.pose.position, offset);
+        tf::vector3MsgToTF(object.scale, scale);
+        triangleObject->setOffset(offset);
+        triangleObject->setScale(scale);
+
+        objects.push_back(std::unique_ptr<Object>(triangleObject));
+    }
+
 
     auto pointList = render(options, objects);
+    ROS_INFO("NmbrPoints: %d", pointList.size());
 
     visualization_msgs::Marker cloud;
     cloud.header.frame_id = "origin";
