@@ -42,6 +42,19 @@ float dot(Vec3f v1, Vec3f v2){
     return v1.x * v2.x + v1.y * v2.y + v1.z * v2.z;
 }
 
+Vec3f normalize(Vec3f v1){
+    float norm = v1.x * v1.x + v1.y * v1.y + v1.z * v1.z;
+    float factor = sqrt(norm);
+
+     Vec3f v = {
+                v1.x * factor,
+                v1.y * factor,
+                v1.z * factor
+     };
+
+    return v;
+}
+
 Vec3f cross(Vec3f v1, Vec3f v2){
      Vec3f v = {
                 v1.x * v2.z - v1.z * v2.y,
@@ -82,6 +95,16 @@ Vec3f vecMulVecElem(Vec3f v1, Vec3f v2){
     return v;
 }
 
+Vec3f vecMulScalar(Vec3f v1, float s){
+    Vec3f v = {
+        v1.x * s,
+        v1.y * s,
+        v1.z * s
+    };
+
+    return v;
+}
+
 /* Struct to hold the ray information
 */
 typedef struct tag_ray
@@ -93,17 +116,19 @@ typedef struct tag_ray
 /**
  * Class to represent a single Triangle
  */
-// class Triangle
-// {
-//     public:
-//         Triangle() : normal(tf::Vector3()), v1(tf::Vector3()), v2(tf::Vector3()), v3(tf::Vector3()) {}
-//         Triangle(tf::Vector3 normalp, tf::Vector3 v1p, tf::Vector3 v2p, tf::Vector3 v3p) :
-//             normal(normalp), v1(v1p), v2(v2p), v3(v3p) {}
-//         Vec3f normal;
-//         Vec3f v1;
-//         Vec3f v2;
-//         Vec3f v3;
-// };
+/*
+class Triangle
+{
+    public:
+        Triangle() : normal(tf::Vector3()), v1(tf::Vector3()), v2(tf::Vector3()), v3(tf::Vector3()) {}
+        Triangle(tf::Vector3 normalp, tf::Vector3 v1p, tf::Vector3 v2p, tf::Vector3 v3p) :
+            normal(normalp), v1(v1p), v2(v2p), v3(v3p) {}
+        Vec3f normal;
+        Vec3f v1;
+        Vec3f v2;
+        Vec3f v3;
+};
+*/
 
 typedef struct tag_Triangle
 {
@@ -164,34 +189,34 @@ class Object
     virtual void getSurfaceProperties(const Vec3f &, const Vec3f &, const uint32_t &, const Vec2f &, Vec3f &, Vec2f &) const = 0;
 };
 
-// bool rayTriangleIntersect(
-//     const Vec3f &orig, const Vec3f &dir,
-//     const Vec3f &v0, const Vec3f &v1, const Vec3f &v2,
-//     float &t, float &u, float &v)
-// {
-//     Vec3f v0v1 = v1 - v0;
-//     Vec3f v0v2 = v2 - v0;
-//     Vec3f pvec = dir.cross(v0v2);
-//     float det = v0v1.dot(pvec);
+bool rayTriangleIntersect(
+    const Vec3f &orig, const Vec3f &dir,
+    const Vec3f &v0, const Vec3f &v1, const Vec3f &v2,
+    float &t, float &u, float &v)
+{
+    Vec3f v0v1 = vecSubVec(v1, v0);
+    Vec3f v0v2 = vecSubVec(v2, v0);
+    Vec3f pvec = cross(dir, v0v2);
+    float det = dot(v0v1, pvec);
 
-//     // ray and triangle are parallel if det is close to 0
-//     if (fabs(det) < kEpsilon) return false;
+    // ray and triangle are parallel if det is close to 0
+    if (fabs(det) < kEpsilon) return false;
 
-//     float invDet = 1 / det;
+    float invDet = 1 / det;
 
-//     Vec3f tvec = orig - v0;
-//     u = tvec.dot(pvec) * invDet;
-//     if (u < 0 || u > 1) return false;
+    Vec3f tvec = vecSubVec(orig, v0);
+    u = dot(tvec, pvec) * invDet;
+    if (u < 0 || u > 1) return false;
 
-//     Vec3f qvec = tvec.cross(v0v1);
-//     v = dir.dot(qvec) * invDet;
-//     if (v < 0 || u + v > 1) return false;
+    Vec3f qvec = cross(tvec, v0v1);
+    v = dot(dir, qvec) * invDet;
+    if (v < 0 || u + v > 1) return false;
     
-//     t = v0v2.dot(qvec) * invDet;
-//     if(t < 0) return false;
+    t = dot(v0v2, qvec) * invDet;
+    if(t < 0) return false;
 
-//     return true;
-// }
+    return true;
+}
 
 class TriangleMesh2 : public Object{
     public:
@@ -204,13 +229,13 @@ class TriangleMesh2 : public Object{
                 const Vec3f &v2 = vecAddVec(triangles[i].v3, offset);
 
                 float t = kInfinity, u, v;
-                // if (rayTriangleIntersect(orig, dir, v0, v1, v2, t, u, v) && t < tNear) {
-                //     tNear = t;
-                //     uv.x = u;
-                //     uv.y = v;
-                //     triIndex = i;
-                //     isect = true;
-                // }
+                if (rayTriangleIntersect(orig, dir, v0, v1, v2, t, u, v) && t < tNear) {
+                    tNear = t;
+                    uv.x = u;
+                    uv.y = v;
+                    triIndex = i;
+                    isect = true;
+                }
             }
             return isect;
         }
@@ -259,177 +284,6 @@ class TriangleMesh2 : public Object{
         Vec3f scale;
 };
 
-/*
-class TriangleMesh : public Object
-{
-public:
-    // Build a triangle mesh from a face index array and a vertex index array
-    TriangleMesh(
-        const uint32_t nfaces,
-        const std::unique_ptr<uint32_t []> &faceIndex,
-        const std::unique_ptr<uint32_t []> &vertsIndex,
-        const std::unique_ptr<Vec3f []> &verts,
-        std::unique_ptr<Vec3f []> &normals,
-        std::unique_ptr<Vec2f []> &st) :
-        numTris(0)
-    {
-        uint32_t k = 0, maxVertIndex = 0;
-        // find out how many triangles we need to create for this mesh
-        for (uint32_t i = 0; i < nfaces; ++i) {
-            numTris += faceIndex[i] - 2;
-            for (uint32_t j = 0; j < faceIndex[i]; ++j)
-                if (vertsIndex[k + j] > maxVertIndex)
-                    maxVertIndex = vertsIndex[k + j];
-            k += faceIndex[i];
-        }
-        maxVertIndex += 1;
-        
-        // allocate memory to store the position of the mesh vertices
-        P = std::unique_ptr<Vec3f []>(new Vec3f[maxVertIndex]);
-        for (uint32_t i = 0; i < maxVertIndex; ++i) {
-            P[i] = verts[i];
-        }
-        
-        // allocate memory to store triangle indices
-        trisIndex = std::unique_ptr<uint32_t []>(new uint32_t [numTris * 3]);
-        uint32_t l = 0;
-        // [comment]
-        // Generate the triangle index array
-        // Keep in mind that there is generally 1 vertex attribute for each vertex of each face.
-        // So for example if you have 2 quads, you only have 6 vertices but you have 2 * 4
-        // vertex attributes (that is 8 normals, 8 texture coordinates, etc.). So the easiest
-        // lazziest method in our triangle mesh, is to create a new array for each supported
-        // vertex attribute (st, normals, etc.) whose size is equal to the number of triangles
-        // multiplied by 3, and then set the value of the vertex attribute at each vertex
-        // of each triangle using the input array (normals[], st[], etc.)
-        // [/comment]
-        N = std::unique_ptr<Vec3f []>(new Vec3f[numTris * 3]);
-        texCoordinates = std::unique_ptr<Vec2f []>(new Vec2f[numTris * 3]);
-        for (uint32_t i = 0, k = 0; i < nfaces; ++i) { // for each  face
-            for (uint32_t j = 0; j < faceIndex[i] - 2; ++j) { // for each triangle in the face
-                trisIndex[l] = vertsIndex[k];
-                trisIndex[l + 1] = vertsIndex[k + j + 1];
-                trisIndex[l + 2] = vertsIndex[k + j + 2];
-                N[l] = normals[k];
-                N[l + 1] = normals[k + j + 1];
-                N[l + 2] = normals[k + j + 2];
-                texCoordinates[l] = st[k];
-                texCoordinates[l + 1] = st[k + j + 1];
-                texCoordinates[l + 2] = st[k + j + 2];
-                l += 3;
-            }
-            k += faceIndex[i];
-        }
-    }
-
-    // Test if the ray interesests this triangle mesh
-    bool intersect(const Vec3f &orig, const Vec3f &dir, float &tNear, uint32_t &triIndex, Vec2f &uv) const
-    {
-        uint32_t j = 0;
-        bool isect = false;
-        for (uint32_t i = 0; i < numTris; ++i) {
-            j = 3*i;
-            const Vec3f &v0 = P[trisIndex[j]];
-            const Vec3f &v1 = P[trisIndex[j + 1]];
-            const Vec3f &v2 = P[trisIndex[j + 2]];
-            float t = kInfinity, u, v;
-            if (rayTriangleIntersect(orig, dir, v0, v1, v2, t, u, v) && t < tNear) {
-              tNear = t;
-              uv.x = u;
-              uv.y = v;
-              triIndex = i;
-              isect = true;
-            }
-            //j += 3;
-        }
-
-        return isect;
-    }
-    void getSurfaceProperties(
-        const Vec3f &hitPoint,
-        const Vec3f &viewDirection,
-        const uint32_t &triIndex,
-        const Vec2f &uv,
-        Vec3f &hitNormal,
-        Vec2f &hitTextureCoordinates) const
-    {
-        // face normal
-        const Vec3f &v0 = P[trisIndex[triIndex * 3]];
-        const Vec3f &v1 = P[trisIndex[triIndex * 3 + 1]];
-        const Vec3f &v2 = P[trisIndex[triIndex * 3 + 2]];
-        hitNormal = (v1 - v0).cross(v2 - v0);
-        hitNormal.normalize();
-        
-        // texture coordinates
-        const Vec2f &st0 = texCoordinates[triIndex * 3];
-        const Vec2f &st1 = texCoordinates[triIndex * 3 + 1];
-        const Vec2f &st2 = texCoordinates[triIndex * 3 + 2];
-        hitTextureCoordinates = (1 - uv.x - uv.y) * st0 + uv.x * st1 + uv.y * st2;
-
-    }
-
-    // member variables
-    uint32_t numTris;                         // number of triangles
-    std::unique_ptr<Vec3f []> P;              // triangles vertex position
-    std::unique_ptr<uint32_t []> trisIndex;   // vertex index array
-    std::unique_ptr<Vec3f []> N;              // triangles vertex normals
-    std::unique_ptr<Vec2f []> texCoordinates; // triangles texture coordinates
-};
-*/
-
-/*
-TriangleMesh* loadPolyMeshFromFile(const char *file)
-{
-    std::ifstream ifs;
-    try {
-        ifs.open(file);
-        if (ifs.fail()) throw;
-        std::stringstream ss;
-        ss << ifs.rdbuf();
-        uint32_t numFaces;
-        ss >> numFaces;
-        std::unique_ptr<uint32_t []> faceIndex(new uint32_t[numFaces]);
-        uint32_t vertsIndexArraySize = 0;
-        // reading face index array
-        for (uint32_t i = 0; i < numFaces; ++i) {
-            ss >> faceIndex[i];
-            vertsIndexArraySize += faceIndex[i];
-        }
-        std::unique_ptr<uint32_t []> vertsIndex(new uint32_t[vertsIndexArraySize]);
-        uint32_t vertsArraySize = 0;
-        // reading vertex index array
-        for (uint32_t i = 0; i < vertsIndexArraySize; ++i) {
-            ss >> vertsIndex[i];
-            if (vertsIndex[i] > vertsArraySize) vertsArraySize = vertsIndex[i];
-        }
-        vertsArraySize += 1;
-        // reading vertices
-        std::unique_ptr<Vec3f []> verts(new Vec3f[vertsArraySize]);
-        for (uint32_t i = 0; i < vertsArraySize; ++i) {
-            ss >> verts[i].x() >> verts[i].y() >> verts[i].z();
-            // printf("Vert X: %.2f Y: %.2f Z: %.2f\n", verts[i].x, verts[i].y, verts[i].z);
-        }
-        // reading normals
-        std::unique_ptr<Vec3f []> normals(new Vec3f[vertsIndexArraySize]);
-        for (uint32_t i = 0; i < vertsIndexArraySize; ++i) {
-            ss >> normals[i].x() >> normals[i].y() >> normals[i].z();
-        }
-        // reading st coordinates
-        std::unique_ptr<Vec2f []> st(new Vec2f[vertsIndexArraySize]);
-        for (uint32_t i = 0; i < vertsIndexArraySize; ++i) {
-            ss >> st[i].x >> st[i].y;
-        }
-        
-        return new TriangleMesh(numFaces, faceIndex, vertsIndex, verts, normals, st);
-    }
-    catch (...) {
-        ifs.close();
-    }
-    ifs.close();
-    
-    return nullptr;
-}
-*/
 
 TriangleMesh2* parse_stl(uint8_t* data, uint32_t size) {
     char n_triangles[4];
@@ -509,135 +363,131 @@ bool trace(
     return (*hitObject != nullptr);
 }
 
-// std::vector<Vec3f> render(const Options &options, const std::vector<std::unique_ptr<Object>> &objects) {
-//     std::vector<Vec3f> pointList(options.horizontalBeams * options.verticalBeams);
-//     int hitCnt = 0;
-//     Vec3f orig(0, 0, 0);
+std::vector<Vec3f> render(const Options &options, const std::vector<std::unique_ptr<Object>> &objects) {
+    std::vector<Vec3f> pointList(options.horizontalBeams * options.verticalBeams);
+    int hitCnt = 0;
+    Vec3f orig{0, 0, 0};
 
-//     auto timeStart = std::chrono::high_resolution_clock::now();
+    auto timeStart = std::chrono::high_resolution_clock::now();
 
-//     for (uint32_t j = 0; j < options.horizontalBeams; ++j) {
-//         #pragma omp parallel for
-//         for (uint32_t i = 0; i < options.verticalBeams; ++i) {
-//             // generate primary ray direction
-//             float vert = i - options.verticalBeams/2.0;
-//             float x = cos(deg2rad((float)j * options.horizontalResolution)) * cos(deg2rad(vert * options.verticalResolution));
-//             float z = sin(deg2rad((float)j * options.horizontalResolution)) * cos(deg2rad(vert * options.verticalResolution));
-//             float y = sin(deg2rad(vert * options.verticalResolution));
+    for (uint32_t j = 0; j < options.horizontalBeams; ++j) {
+        #pragma omp parallel for
+        for (uint32_t i = 0; i < options.verticalBeams; ++i) {
+            // generate primary ray direction
+            float vert = i - options.verticalBeams/2.0;
+            float x = cos(deg2rad((float)j * options.horizontalResolution)) * cos(deg2rad(vert * options.verticalResolution));
+            float z = sin(deg2rad((float)j * options.horizontalResolution)) * cos(deg2rad(vert * options.verticalResolution));
+            float y = sin(deg2rad(vert * options.verticalResolution));
 
-//             Vec3f dir = Vec3f(x, y, -z).normalize();
+            Vec3f dir = normalize(Vec3f{x, y, -z});
 
-//             float tnear = kInfinity;
-//             Vec2f uv;
-//             uint32_t index = 0;
-//             Object *hitObject = nullptr;
-//             if (trace(orig, dir, objects, tnear, index, uv, &hitObject)) {
-//                 Vec3f hitPoint = orig + dir * tnear;
+            float tnear = kInfinity;
+            Vec2f uv;
+            uint32_t index = 0;
+            Object *hitObject = nullptr;
+            if (trace(orig, dir, objects, tnear, index, uv, &hitObject)) {
+                Vec3f hitPoint = vecMulScalar(vecAddVec(orig, dir), tnear);
 
-//                 pointList[hitCnt] = Vec3f(hitPoint.x(), hitPoint.y(), hitPoint.z());
-//                 hitCnt++;
-//             }
-//         }
-//         // fprintf(stderr, "\r%3d%c", uint32_t(j / (float)options.height * 100), '%');
-//     }
+                pointList[hitCnt] = Vec3f{hitPoint.x, hitPoint.y, hitPoint.z};
+                hitCnt++;
+            }
+        }
+        // fprintf(stderr, "\r%3d%c", uint32_t(j / (float)options.height * 100), '%');
+    }
 
-//     auto timeEnd = std::chrono::high_resolution_clock::now();
-//     auto passedTime = std::chrono::duration<double, std::milli>(timeEnd - timeStart).count();
-//     fprintf(stderr, "\rDone: %.2f (sec)\n", passedTime / 1000);
+    auto timeEnd = std::chrono::high_resolution_clock::now();
+    auto passedTime = std::chrono::duration<double, std::milli>(timeEnd - timeStart).count();
+    fprintf(stderr, "\rDone: %.2f (sec)\n", passedTime / 1000);
 
-//     pointList.resize(hitCnt);
-//     return pointList;
-// }
+    pointList.resize(hitCnt);
+    return pointList;
+}
 
-// bool simulate(lidarSimulator::LiDARSimulationRequest  &req, lidarSimulator::LiDARSimulationResponse &res) {
-//     Options options;
+bool simulate(lidarSimulator::LiDARSimulationRequest  &req, lidarSimulator::LiDARSimulationResponse &res) {
+    Options options;
 
-//     options.horizontalBeams = req.scanner.horizontalBeams;
-//     options.verticalBeams = req.scanner.verticalBeams;
-//     options.horizontalResolution = req.scanner.horizontalResolution;
-//     options.verticalResolution = req.scanner.verticalResolution;
+    options.horizontalBeams = req.scanner.horizontalBeams;
+    options.verticalBeams = req.scanner.verticalBeams;
+    options.horizontalResolution = req.scanner.horizontalResolution;
+    options.verticalResolution = req.scanner.verticalResolution;
 
-//     // TriangleMesh2* object = parse_stl(std::string("cow.stl"));
-//     // TriangleMesh2* object = parse_stl(std::string("twizy.stl"));
-//     // TriangleMesh2* object2 = parse_stl(std::string("qube.stl"));
-//     // TriangleMesh2* object = parse_stl(std::string("twizy_low_poly.stl"));
+    // TriangleMesh2* object = parse_stl(std::string("cow.stl"));
+    // TriangleMesh2* object = parse_stl(std::string("twizy.stl"));
+    // TriangleMesh2* object2 = parse_stl(std::string("qube.stl"));
+    // TriangleMesh2* object = parse_stl(std::string("twizy_low_poly.stl"));
 
-//     std::vector<std::unique_ptr<Object>> objects;
+    std::vector<std::unique_ptr<Object>> objects;
 
-//     resource_retriever::MemoryResource resource;
-//     for(auto object : req.objects){
-//         try {
-//             resource = r.get(object.object); 
-//         } catch (resource_retriever::Exception& e) {
-//             ROS_ERROR("Failed to retrieve file: %s", e.what());
-//             return false;
-//         }
+    resource_retriever::MemoryResource resource;
+    for(auto object : req.objects){
+        try {
+            resource = r.get(object.object); 
+        } catch (resource_retriever::Exception& e) {
+            ROS_ERROR("Failed to retrieve file: %s", e.what());
+            return false;
+        }
 
-//         uint8_t* r_data = resource.data.get();
-//         TriangleMesh2* triangleObject = parse_stl(resource.data.get(), resource.size);
+        uint8_t* r_data = resource.data.get();
+        TriangleMesh2* triangleObject = parse_stl(resource.data.get(), resource.size);
 
-//         Vec3f offset;
-//         Vec3f scale;
-//         tf::pointMsgToTF(object.pose.position, offset);
-//         tf::vector3MsgToTF(object.scale, scale);
-//         triangleObject->setOffset(offset);
-//         triangleObject->setScale(scale);
+        triangleObject->setOffset(Vec3f{object.pose.position.x, object.pose.position.y, object.pose.position.z});
+        triangleObject->setScale(Vec3f{object.scale.x, object.scale.y, object.scale.z});
 
-//         objects.push_back(std::unique_ptr<Object>(triangleObject));
-//     }
+        objects.push_back(std::unique_ptr<Object>(triangleObject));
+    }
 
 
-//     auto pointList = render(options, objects);
-//     ROS_INFO("NmbrPoints: %d", pointList.size());
+    auto pointList = render(options, objects);
+    ROS_INFO("NmbrPoints: %d", pointList.size());
 
-//     visualization_msgs::Marker cloud;
-//     cloud.header.frame_id = "origin";
-//     cloud.type = visualization_msgs::Marker::POINTS;
-//     cloud.scale.x = 0.01;
-//     cloud.scale.y = 0.01;
-//     cloud.scale.z = 0.01;
-//     cloud.color.a = 1;
-//     cloud.color.r = 1;
-//     cloud.color.g = 0;
-//     cloud.color.b = 0;
+    visualization_msgs::Marker cloud;
+    cloud.header.frame_id = "origin";
+    cloud.type = visualization_msgs::Marker::POINTS;
+    cloud.scale.x = 0.01;
+    cloud.scale.y = 0.01;
+    cloud.scale.z = 0.01;
+    cloud.color.a = 1;
+    cloud.color.r = 1;
+    cloud.color.g = 0;
+    cloud.color.b = 0;
 
-//     std::vector<geometry_msgs::Point> cloud_points;
-//     for(uint32_t i = 0; i < pointList.size(); i++){
-//         geometry_msgs::Point tmp;
-//         tmp.x = pointList[i].x();
-//         tmp.y = -pointList[i].z();
-//         tmp.z = pointList[i].y();
+    std::vector<geometry_msgs::Point> cloud_points;
+    for(uint32_t i = 0; i < pointList.size(); i++){
+        geometry_msgs::Point tmp;
+        tmp.x = pointList[i].x;
+        tmp.y = -pointList[i].z;
+        tmp.z = pointList[i].y;
 
-//         cloud_points.push_back(tmp);
-//     }
+        cloud_points.push_back(tmp);
+    }
 
-//     cloud.points = cloud_points;
+    cloud.points = cloud_points;
 
-//     cloudPub.publish(cloud);
+    cloudPub.publish(cloud);
 
-//     res.cloud = cloud;
+    res.cloud = cloud;
     
-//     return true;
-// }
+    return true;
+}
 
-// void saveToFile(std::vector<Vec3f> pointList){
-//     // save pointcloud to file
-//     std::ofstream ofs;
-//     ofs.open("plc_out.ply");
-//     ofs << "ply\n"
-//      << "format ascii 1.0\n"
-//      << "element vertex " << pointList.size() <<"\n"
-//      << "property float32 x\n"
-//      << "property float32 y\n"
-//      << "property float32 z\n"
-//      << "end_header\n";
+void saveToFile(std::vector<Vec3f> pointList){
+    // save pointcloud to file
+    std::ofstream ofs;
+    ofs.open("plc_out.ply");
+    ofs << "ply\n"
+     << "format ascii 1.0\n"
+     << "element vertex " << pointList.size() <<"\n"
+     << "property float32 x\n"
+     << "property float32 y\n"
+     << "property float32 z\n"
+     << "end_header\n";
 
-//     for (uint32_t i = 0; i < pointList.size(); ++i) {
-//         ofs << pointList[i].x() << " " << pointList[i].y()  << " " << pointList[i].z() << std::endl;
-//     }
+    for (uint32_t i = 0; i < pointList.size(); ++i) {
+        ofs << pointList[i].x << " " << pointList[i].y  << " " << pointList[i].z << std::endl;
+    }
 
-//     ofs.close();
-// }
+    ofs.close();
+}
 
 int main(int argc, char **argv) {
     // ros::init(argc, argv, "lidarSimulator");
@@ -677,13 +527,15 @@ int main(int argc, char **argv) {
 
     sources.push_back({kernel_code.c_str(), kernel_code.length()});
 
+    auto timeStart = std::chrono::high_resolution_clock::now();
+
     cl::Program program(context, sources);
     if(program.build({default_device}) != CL_SUCCESS){
         std::cout << " Error building: " << program.getBuildInfo<CL_PROGRAM_BUILD_LOG>(default_device) << std::endl;
         exit(1);
     }
 
-    TriangleMesh2* object = parse_stl(std::string("qube.stl"));
+    TriangleMesh2* object = parse_stl(std::string("twizy.stl"));
     object->setScale(Vec3f{0.01, 0.01, 0.01});
     object->setOffset(Vec3f{0, 0, 3});
 
@@ -698,30 +550,21 @@ int main(int argc, char **argv) {
     // }
 
     int numberWorkers = object->triangles.size();
-    // int numberWorkers = 1;
-    Triangle testtri = {
-        {0, 0, 0},
-        {-1, -1, 2},
-        {1, 1, 2},
-        {1, -1, 2}
-    };
     ray testray = {
-               Vec3f{0, 0, 0},
-               Vec3f{0, 0, 1}
-               };
+                    Vec3f{0, 0, 0},
+                    Vec3f{0, 0, 1}
+                  };
 
     // create buffers on the device
     cl::Buffer buffer_tris(context, CL_MEM_READ_WRITE, sizeof(Triangle)*numberWorkers);
     cl::Buffer buffer_ray(context, CL_MEM_READ_WRITE, sizeof(ray));
     cl::Buffer buffer_distances(context, CL_MEM_READ_WRITE, sizeof(double)*numberWorkers);
-    // cl::Buffer buffer_distances(context, CL_MEM_READ_WRITE, sizeof(Triangle)*numberWorkers);
 
     //create queue to which we will push commands for the device.
     cl::CommandQueue queue(context, default_device);
 
     //write arrays tris and ray to the device
     queue.enqueueWriteBuffer(buffer_tris,  CL_TRUE, 0, sizeof(Triangle)*numberWorkers, &(object->triangles[0]));
-    // queue.enqueueWriteBuffer(buffer_tris,  CL_TRUE, 0, sizeof(Triangle)*numberWorkers, &testtri);
     queue.enqueueWriteBuffer(buffer_ray,  CL_TRUE, 0, sizeof(ray), &testray);
 
     //run the kernel
@@ -741,17 +584,9 @@ int main(int argc, char **argv) {
         std::cout << distances[i] << std::endl;
     }
 
-    // Triangle *distances = new Triangle[numberWorkers];
-    // queue.enqueueReadBuffer(buffer_distances, CL_TRUE, 0, sizeof(Triangle)*numberWorkers, distances);
-    // for(int i=0; i<numberWorkers; i++){
-    //     auto v = distances[i].v1;
-    //     std::cout << "X: " << v.x << "Y: " << v.y << "Z: " << v.z << std::endl;
-    //     v = distances[i].v2;
-    //     std::cout << "X: " << v.x << "Y: " << v.y << "Z: " << v.z << std::endl;
-    //     v = distances[i].v3;
-    //     std::cout << "X: " << v.x << "Y: " << v.y << "Z: " << v.z << std::endl;
-    //     std::cout << std::endl;
-    // }
+    auto timeEnd = std::chrono::high_resolution_clock::now();
+    auto passedTime = std::chrono::duration<double, std::milli>(timeEnd - timeStart).count();
+    fprintf(stderr, "\rDone: %.2f (sec)\n", passedTime / 1000);
 
     // ros::spin();
 
