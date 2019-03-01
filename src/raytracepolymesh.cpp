@@ -527,7 +527,6 @@ int main(int argc, char **argv) {
 
     sources.push_back({kernel_code.c_str(), kernel_code.length()});
 
-    auto timeStart = std::chrono::high_resolution_clock::now();
 
     cl::Program program(context, sources);
     if(program.build({default_device}) != CL_SUCCESS){
@@ -535,7 +534,7 @@ int main(int argc, char **argv) {
         exit(1);
     }
 
-    TriangleMesh2* object = parse_stl(std::string("twizy.stl"));
+    TriangleMesh2* object = parse_stl(std::string("twizy_low_poly.stl"));
     object->setScale(Vec3f{0.01, 0.01, 0.01});
     object->setOffset(Vec3f{0, 0, 3});
 
@@ -549,23 +548,53 @@ int main(int argc, char **argv) {
     //     std::cout << std::endl;
     // }
 
-    int numberWorkers = object->triangles.size();
+    int numberTris = object->triangles.size();
+    printf("Numbertris: %d\n", numberTris);
     ray testray = {
                     Vec3f{0, 0, 0},
                     Vec3f{0, 0, 1}
                   };
 
+    int horizontalBeams = 3600;
+    int verticalBeams = 15;
+    float horizontalResolution = 0.1;
+    float verticalResolution = 2.0;
+
+    int numberRays = horizontalBeams * verticalBeams;
+    ray *testrays = new ray[numberRays];
+
+    for (uint32_t j = 0; j < horizontalBeams; ++j) {
+        for (uint32_t i = 0; i < verticalBeams; ++i) {
+            // generate primary ray direction
+            float vert = i - verticalBeams/2.0;
+            float x = cos(deg2rad((float)j * horizontalResolution)) * cos(deg2rad(vert * verticalResolution));
+            float z = sin(deg2rad((float)j * horizontalResolution)) * cos(deg2rad(vert * verticalResolution));
+            float y = sin(deg2rad(vert * verticalResolution));
+
+            Vec3f dir = normalize(Vec3f{x, y, -z});
+            ray r = {
+                Vec3f{0, 0, 0},
+                dir
+            };
+
+            int id = j*verticalBeams + i;
+            testrays[id] = r;
+        }
+    }
+
     // create buffers on the device
-    cl::Buffer buffer_tris(context, CL_MEM_READ_WRITE, sizeof(Triangle)*numberWorkers);
-    cl::Buffer buffer_ray(context, CL_MEM_READ_WRITE, sizeof(ray));
-    cl::Buffer buffer_distances(context, CL_MEM_READ_WRITE, sizeof(double)*numberWorkers);
+    cl::Buffer buffer_tris(context, CL_MEM_READ_ONLY, sizeof(Triangle)*numberTris);
+    // cl::Buffer buffer_ray(context, CL_MEM_READ_WRITE, sizeof(ray));
+    cl::Buffer buffer_ray(context, CL_MEM_READ_ONLY, sizeof(ray)*numberRays);
+    cl::Buffer buffer_distances(context, CL_MEM_READ_WRITE, sizeof(double)*numberTris*numberRays);
 
     //create queue to which we will push commands for the device.
     cl::CommandQueue queue(context, default_device);
 
     //write arrays tris and ray to the device
-    queue.enqueueWriteBuffer(buffer_tris,  CL_TRUE, 0, sizeof(Triangle)*numberWorkers, &(object->triangles[0]));
-    queue.enqueueWriteBuffer(buffer_ray,  CL_TRUE, 0, sizeof(ray), &testray);
+    queue.enqueueWriteBuffer(buffer_tris,  CL_TRUE, 0, sizeof(Triangle)*numberTris, &(object->triangles[0]));
+    // queue.enqueueWriteBuffer(buffer_ray,  CL_TRUE, 0, sizeof(ray), &testray);
+    queue.enqueueWriteBuffer(buffer_ray,  CL_TRUE, 0, sizeof(ray)*numberRays, &testrays[0]);
 
     //run the kernel
     cl::Kernel kernel_intersect = cl::Kernel(program, "rayTriangleIntersect");
@@ -574,19 +603,35 @@ int main(int argc, char **argv) {
     kernel_intersect.setArg(2, buffer_distances);
 
     //Nullrange for workergroup size means the driver will calculate the "best" workgroup size
-    queue.enqueueNDRangeKernel(kernel_intersect, cl::NullRange, cl::NDRange(numberWorkers), cl::NullRange);
+    // queue.enqueueNDRangeKernel(kernel_intersect, cl::NullRange, cl::NDRange(numberTris), cl::NullRange);
+    queue.enqueueNDRangeKernel(kernel_intersect, cl::NullRange, cl::NDRange(numberTris, numberRays), cl::NullRange);
     queue.finish();
 
+    auto timeStart = std::chrono::high_resolution_clock::now();
+
     //get result from device to host
-    double *distances = new double[numberWorkers];
-    queue.enqueueReadBuffer(buffer_distances, CL_TRUE, 0, sizeof(double)*numberWorkers, distances);
-    for(int i=0; i<numberWorkers; i++){
-        std::cout << distances[i] << std::endl;
-    }
+    double *distances = new double[numberTris*numberRays];
+    queue.enqueueReadBuffer(buffer_distances, CL_TRUE, 0, sizeof(double)*numberTris*numberRays, distances);
 
     auto timeEnd = std::chrono::high_resolution_clock::now();
     auto passedTime = std::chrono::duration<double, std::milli>(timeEnd - timeStart).count();
     fprintf(stderr, "\rDone: %.2f (sec)\n", passedTime / 1000);
+
+    std::vector<Vec3f> pointList;
+    for(int i=0; i<numberTris; i++){
+        for(int j=0; j<numberRays; j++){
+            // std::cout << distances[i] << std::endl;
+            double dist = distances[i*numberRays + j];
+            if(dist > 0){
+                // std::cout << dist << std::endl;
+                ray the_ray = testrays[j];
+                Vec3f hitPoint = vecMulScalar(vecAddVec(the_ray.origin, the_ray.dir), dist);
+                pointList.push_back(hitPoint);
+            }
+        }
+    }
+
+    saveToFile(pointList);
 
     // ros::spin();
 

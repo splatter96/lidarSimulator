@@ -45,15 +45,16 @@ Vec3f vecSubVec(Vec3f v1, Vec3f v2){
     return v;
 }
 
-void kernel rayTriangleIntersect(global Triangle* tris, global ray_type* ray, global double* distances){
+void kernel rayTriangleIntersect(global Triangle* tris, global ray_type* rays, global double* distances){
     int id = get_global_id(0);
 
     Vec3f v0 = tris[id].v1;
     Vec3f v1 = tris[id].v2;
     Vec3f v2 = tris[id].v3;
 
-    Vec3f orig = ray->origin;
-    Vec3f dir = ray->dir;
+    ray_type ray = rays[get_global_id(1)];
+    Vec3f orig = ray.origin;
+    Vec3f dir = ray.dir;
 
     float t, u, v;
 
@@ -78,5 +79,5 @@ void kernel rayTriangleIntersect(global Triangle* tris, global ray_type* ray, gl
     t = dot(v0v2, qvec) * invDet;
     if(t < 0) return;
 
-    distances[id] = t;
+    distances[id*get_global_size(1)+get_global_id(1)] = t;
 }
