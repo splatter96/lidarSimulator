@@ -18,6 +18,7 @@ find_package(catkin REQUIRED COMPONENTS
 )
 
 find_package(OpenMP)
+find_package(OpenCL REQUIRED)
 
 add_message_files(
   FILES
@@ -54,7 +55,10 @@ catkin_package(
 include_directories(
   include
   ${catkin_INCLUDE_DIRS}
+  ${OpenCL_INCLUDE_DIRS}
 )
+
+link_directories(${OpenCL_LIBRARY})
 
 ## Declare a C++ executable
 add_executable(lidarSimulator src/raytracepolymesh.cpp)
@@ -66,6 +70,7 @@ add_dependencies(lidarSimulator ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXP
 target_link_libraries(
   lidarSimulator
   ${catkin_LIBRARIES}
+  ${OpenCL_LIBRARY}
 )
 
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -O3")

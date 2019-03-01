@@ -61,18 +61,3 @@ public:
 };
 
 typedef Vec2<float> Vec2f;
-
-/**
- * Class to represent a single Triangle
- */
-class Triangle
-{
-    public:
-        Triangle() : normal(tf::Vector3()), v1(tf::Vector3()), v2(tf::Vector3()), v3(tf::Vector3()) {}
-        Triangle(tf::Vector3 normalp, tf::Vector3 v1p, tf::Vector3 v2p, tf::Vector3 v3p) :
-            normal(normalp), v1(v1p), v2(v2p), v3(v3p) {}
-        tf::Vector3 normal;
-        tf::Vector3 v1;
-        tf::Vector3 v2;
-        tf::Vector3 v3;
-};

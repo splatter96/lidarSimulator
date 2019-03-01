@@ -9,6 +9,8 @@
 #include <cmath>
 #include <chrono>
 
+#include <CL/cl.hpp>
+
 #include "ros/ros.h"
 #include <resource_retriever/retriever.h>
 #include <tf/transform_datatypes.h>
@@ -20,7 +22,7 @@
 
 #include "geometry.h"
 
-typedef tf::Vector3 Vec3f;
+// typedef tf::Vector3 Vec3f;
 
 static const float kInfinity = std::numeric_limits<float>::max();
 static const float kEpsilon = 1e-8;
@@ -28,6 +30,88 @@ static const float kEpsilon = 1e-8;
 ros::Publisher cloudPub;
 
 resource_retriever::Retriever r;
+
+typedef struct tag_Vec
+{
+    float       x;
+    float       y;
+    float       z;
+} Vec3f;
+
+float dot(Vec3f v1, Vec3f v2){
+    return v1.x * v2.x + v1.y * v2.y + v1.z * v2.z;
+}
+
+Vec3f cross(Vec3f v1, Vec3f v2){
+     Vec3f v = {
+                v1.x * v2.z - v1.z * v2.y,
+                v1.y * v2.x - v1.x * v2.z,
+                v1.z * v2.y - v1.y * v2.x
+     };
+
+     return v;
+}
+
+Vec3f vecAddVec(Vec3f v1, Vec3f v2){
+    Vec3f v = {
+        v1.x + v2.x,
+        v1.y + v2.y,
+        v1.z + v2.z
+    };
+
+    return v;
+}
+
+Vec3f vecSubVec(Vec3f v1, Vec3f v2){
+    Vec3f v = {
+        v1.x - v2.x,
+        v1.y - v2.y,
+        v1.z - v2.z
+    };
+
+    return v;
+}
+
+Vec3f vecMulVecElem(Vec3f v1, Vec3f v2){
+    Vec3f v = {
+        v1.x * v2.x,
+        v1.y * v2.y,
+        v1.z * v2.z
+    };
+
+    return v;
+}
+
+/* Struct to hold the ray information
+*/
+typedef struct tag_ray
+{
+    Vec3f       origin;
+    Vec3f       dir;
+} ray;
+
+/**
+ * Class to represent a single Triangle
+ */
+// class Triangle
+// {
+//     public:
+//         Triangle() : normal(tf::Vector3()), v1(tf::Vector3()), v2(tf::Vector3()), v3(tf::Vector3()) {}
+//         Triangle(tf::Vector3 normalp, tf::Vector3 v1p, tf::Vector3 v2p, tf::Vector3 v3p) :
+//             normal(normalp), v1(v1p), v2(v2p), v3(v3p) {}
+//         Vec3f normal;
+//         Vec3f v1;
+//         Vec3f v2;
+//         Vec3f v3;
+// };
+
+typedef struct tag_Triangle
+{
+    Vec3f normal;
+    Vec3f v1;
+    Vec3f v2;
+    Vec3f v3;
+} Triangle;
 
 inline float deg2rad(const float &deg) {
      return deg * M_PI / 180;
@@ -42,7 +126,6 @@ float parse_float(std::ifstream& s) {
 
  float parse_float(uint8_t* data, int offset){
    char f_buf[sizeof(float)];
-//    s.read(f_buf, 4);
    std::copy(data + offset, data + offset + 4, f_buf);
    float* fptr = (float*) f_buf;
    return *fptr;
@@ -52,7 +135,7 @@ float parse_float(std::ifstream& s) {
     float x = parse_float(s);
     float y = parse_float(s);
     float z = parse_float(s);
-    return Vec3f(x, y, z);
+    return Vec3f{x, y, z};
  }
 
  Vec3f parse_point(uint8_t* data, int* offset){
@@ -60,7 +143,7 @@ float parse_float(std::ifstream& s) {
     float y = parse_float(data, *offset+4);
     float z = parse_float(data, *offset+8);
     *offset += 12;
-    return Vec3f(x, y, z);
+    return Vec3f{x, y, z};
  }
 
 
@@ -81,53 +164,53 @@ class Object
     virtual void getSurfaceProperties(const Vec3f &, const Vec3f &, const uint32_t &, const Vec2f &, Vec3f &, Vec2f &) const = 0;
 };
 
-bool rayTriangleIntersect(
-    const Vec3f &orig, const Vec3f &dir,
-    const Vec3f &v0, const Vec3f &v1, const Vec3f &v2,
-    float &t, float &u, float &v)
-{
-    Vec3f v0v1 = v1 - v0;
-    Vec3f v0v2 = v2 - v0;
-    Vec3f pvec = dir.cross(v0v2);
-    float det = v0v1.dot(pvec);
+// bool rayTriangleIntersect(
+//     const Vec3f &orig, const Vec3f &dir,
+//     const Vec3f &v0, const Vec3f &v1, const Vec3f &v2,
+//     float &t, float &u, float &v)
+// {
+//     Vec3f v0v1 = v1 - v0;
+//     Vec3f v0v2 = v2 - v0;
+//     Vec3f pvec = dir.cross(v0v2);
+//     float det = v0v1.dot(pvec);
 
-    // ray and triangle are parallel if det is close to 0
-    if (fabs(det) < kEpsilon) return false;
+//     // ray and triangle are parallel if det is close to 0
+//     if (fabs(det) < kEpsilon) return false;
 
-    float invDet = 1 / det;
+//     float invDet = 1 / det;
 
-    Vec3f tvec = orig - v0;
-    u = tvec.dot(pvec) * invDet;
-    if (u < 0 || u > 1) return false;
+//     Vec3f tvec = orig - v0;
+//     u = tvec.dot(pvec) * invDet;
+//     if (u < 0 || u > 1) return false;
 
-    Vec3f qvec = tvec.cross(v0v1);
-    v = dir.dot(qvec) * invDet;
-    if (v < 0 || u + v > 1) return false;
+//     Vec3f qvec = tvec.cross(v0v1);
+//     v = dir.dot(qvec) * invDet;
+//     if (v < 0 || u + v > 1) return false;
     
-    t = v0v2.dot(qvec) * invDet;
-    if(t < 0) return false;
+//     t = v0v2.dot(qvec) * invDet;
+//     if(t < 0) return false;
 
-    return true;
-}
+//     return true;
+// }
 
 class TriangleMesh2 : public Object{
     public:
-        TriangleMesh2(std::vector<Triangle> tris):triangles(tris), offset(Vec3f(0, 0, 0)){}
+        TriangleMesh2(std::vector<Triangle> tris):triangles(tris), offset(Vec3f{0, 0, 0}){}
         bool intersect(const Vec3f &orig, const Vec3f &dir, float &tNear, uint32_t &triIndex, Vec2f &uv) const {
             bool isect = false;
             for (uint32_t i = 0; i < triangles.size(); ++i) {
-                const Vec3f &v0 = triangles[i].v1 + offset;
-                const Vec3f &v1 = triangles[i].v2 + offset;
-                const Vec3f &v2 = triangles[i].v3 + offset;
+                const Vec3f &v0 = vecAddVec(triangles[i].v1, offset);
+                const Vec3f &v1 = vecAddVec(triangles[i].v2, offset);
+                const Vec3f &v2 = vecAddVec(triangles[i].v3, offset);
 
                 float t = kInfinity, u, v;
-                if (rayTriangleIntersect(orig, dir, v0, v1, v2, t, u, v) && t < tNear) {
-                    tNear = t;
-                    uv.x = u;
-                    uv.y = v;
-                    triIndex = i;
-                    isect = true;
-                }
+                // if (rayTriangleIntersect(orig, dir, v0, v1, v2, t, u, v) && t < tNear) {
+                //     tNear = t;
+                //     uv.x = u;
+                //     uv.y = v;
+                //     triIndex = i;
+                //     isect = true;
+                // }
             }
             return isect;
         }
@@ -149,11 +232,11 @@ class TriangleMesh2 : public Object{
     void setOffset(Vec3f off){
         this->offset = off;
         for (uint32_t i = 0; i < triangles.size(); ++i) {
-            auto v0 = triangles[i].v1 + offset;
-            auto v1 = triangles[i].v2 + offset;
-            auto v2 = triangles[i].v3 + offset;
+            auto v0 = vecAddVec(triangles[i].v1, offset);
+            auto v1 = vecAddVec(triangles[i].v2, offset);
+            auto v2 = vecAddVec(triangles[i].v3, offset);
             auto normal = triangles[i].normal;
-            triangles[i] = Triangle(normal, v0, v1, v2);
+            triangles[i] = Triangle{normal, v0, v1, v2};
         }
     }
 
@@ -161,11 +244,11 @@ class TriangleMesh2 : public Object{
         this->scale = scale;
 
         for (uint32_t i = 0; i < triangles.size(); ++i) {
-            auto v0 = triangles[i].v1 * scale;
-            auto v1 = triangles[i].v2 * scale;
-            auto v2 = triangles[i].v3 * scale;
+            auto v0 = vecMulVecElem(triangles[i].v1, scale);
+            auto v1 = vecMulVecElem(triangles[i].v2, scale);
+            auto v2 = vecMulVecElem(triangles[i].v3, scale);
             auto normal = triangles[i].normal;
-            triangles[i] = Triangle(normal, v0, v1, v2);
+            triangles[i] = Triangle{normal, v0, v1, v2};
         }
     }
 
@@ -364,7 +447,7 @@ TriangleMesh2* parse_stl(uint8_t* data, uint32_t size) {
       auto v1 = parse_point(data, &offset);
       auto v2 = parse_point(data, &offset);
       auto v3 = parse_point(data, &offset);
-      tris[i] = Triangle(normal, v1, v2, v3);
+      tris[i] = Triangle{normal, v1, v2, v3};
 
       // skip over the 2 'attribute bytes'
       offset += 2;
@@ -396,7 +479,7 @@ TriangleMesh2* parse_stl(const std::string& stl_path) {
       auto v1 = parse_point(stl_file);
       auto v2 = parse_point(stl_file);
       auto v3 = parse_point(stl_file);
-      tris[i] = Triangle(normal, v1, v2, v3);
+      tris[i] = Triangle{normal, v1, v2, v3};
 
       char dummy[2];
       stl_file.read(dummy, 2);
@@ -426,145 +509,251 @@ bool trace(
     return (*hitObject != nullptr);
 }
 
-std::vector<Vec3f> render(const Options &options, const std::vector<std::unique_ptr<Object>> &objects) {
-    std::vector<Vec3f> pointList(options.horizontalBeams * options.verticalBeams);
-    int hitCnt = 0;
-    Vec3f orig(0, 0, 0);
+// std::vector<Vec3f> render(const Options &options, const std::vector<std::unique_ptr<Object>> &objects) {
+//     std::vector<Vec3f> pointList(options.horizontalBeams * options.verticalBeams);
+//     int hitCnt = 0;
+//     Vec3f orig(0, 0, 0);
 
-    auto timeStart = std::chrono::high_resolution_clock::now();
+//     auto timeStart = std::chrono::high_resolution_clock::now();
 
-    for (uint32_t j = 0; j < options.horizontalBeams; ++j) {
-        #pragma omp parallel for
-        for (uint32_t i = 0; i < options.verticalBeams; ++i) {
-            // generate primary ray direction
-            float vert = i - options.verticalBeams/2.0;
-            float x = cos(deg2rad((float)j * options.horizontalResolution)) * cos(deg2rad(vert * options.verticalResolution));
-            float z = sin(deg2rad((float)j * options.horizontalResolution)) * cos(deg2rad(vert * options.verticalResolution));
-            float y = sin(deg2rad(vert * options.verticalResolution));
+//     for (uint32_t j = 0; j < options.horizontalBeams; ++j) {
+//         #pragma omp parallel for
+//         for (uint32_t i = 0; i < options.verticalBeams; ++i) {
+//             // generate primary ray direction
+//             float vert = i - options.verticalBeams/2.0;
+//             float x = cos(deg2rad((float)j * options.horizontalResolution)) * cos(deg2rad(vert * options.verticalResolution));
+//             float z = sin(deg2rad((float)j * options.horizontalResolution)) * cos(deg2rad(vert * options.verticalResolution));
+//             float y = sin(deg2rad(vert * options.verticalResolution));
 
-            Vec3f dir = Vec3f(x, y, -z).normalize();
+//             Vec3f dir = Vec3f(x, y, -z).normalize();
 
-            float tnear = kInfinity;
-            Vec2f uv;
-            uint32_t index = 0;
-            Object *hitObject = nullptr;
-            if (trace(orig, dir, objects, tnear, index, uv, &hitObject)) {
-                Vec3f hitPoint = orig + dir * tnear;
+//             float tnear = kInfinity;
+//             Vec2f uv;
+//             uint32_t index = 0;
+//             Object *hitObject = nullptr;
+//             if (trace(orig, dir, objects, tnear, index, uv, &hitObject)) {
+//                 Vec3f hitPoint = orig + dir * tnear;
 
-                pointList[hitCnt] = Vec3f(hitPoint.x(), hitPoint.y(), hitPoint.z());
-                hitCnt++;
-            }
-        }
-        // fprintf(stderr, "\r%3d%c", uint32_t(j / (float)options.height * 100), '%');
-    }
+//                 pointList[hitCnt] = Vec3f(hitPoint.x(), hitPoint.y(), hitPoint.z());
+//                 hitCnt++;
+//             }
+//         }
+//         // fprintf(stderr, "\r%3d%c", uint32_t(j / (float)options.height * 100), '%');
+//     }
 
-    auto timeEnd = std::chrono::high_resolution_clock::now();
-    auto passedTime = std::chrono::duration<double, std::milli>(timeEnd - timeStart).count();
-    fprintf(stderr, "\rDone: %.2f (sec)\n", passedTime / 1000);
+//     auto timeEnd = std::chrono::high_resolution_clock::now();
+//     auto passedTime = std::chrono::duration<double, std::milli>(timeEnd - timeStart).count();
+//     fprintf(stderr, "\rDone: %.2f (sec)\n", passedTime / 1000);
 
-    pointList.resize(hitCnt);
-    return pointList;
-}
+//     pointList.resize(hitCnt);
+//     return pointList;
+// }
 
-bool simulate(lidarSimulator::LiDARSimulationRequest  &req, lidarSimulator::LiDARSimulationResponse &res) {
-    Options options;
+// bool simulate(lidarSimulator::LiDARSimulationRequest  &req, lidarSimulator::LiDARSimulationResponse &res) {
+//     Options options;
 
-    options.horizontalBeams = req.scanner.horizontalBeams;
-    options.verticalBeams = req.scanner.verticalBeams;
-    options.horizontalResolution = req.scanner.horizontalResolution;
-    options.verticalResolution = req.scanner.verticalResolution;
+//     options.horizontalBeams = req.scanner.horizontalBeams;
+//     options.verticalBeams = req.scanner.verticalBeams;
+//     options.horizontalResolution = req.scanner.horizontalResolution;
+//     options.verticalResolution = req.scanner.verticalResolution;
 
-    // TriangleMesh2* object = parse_stl(std::string("cow.stl"));
-    // TriangleMesh2* object = parse_stl(std::string("twizy.stl"));
-    // TriangleMesh2* object2 = parse_stl(std::string("qube.stl"));
-    // TriangleMesh2* object = parse_stl(std::string("twizy_low_poly.stl"));
+//     // TriangleMesh2* object = parse_stl(std::string("cow.stl"));
+//     // TriangleMesh2* object = parse_stl(std::string("twizy.stl"));
+//     // TriangleMesh2* object2 = parse_stl(std::string("qube.stl"));
+//     // TriangleMesh2* object = parse_stl(std::string("twizy_low_poly.stl"));
 
-    std::vector<std::unique_ptr<Object>> objects;
+//     std::vector<std::unique_ptr<Object>> objects;
 
-    resource_retriever::MemoryResource resource;
-    for(auto object : req.objects){
-        try {
-            resource = r.get(object.object); 
-        } catch (resource_retriever::Exception& e) {
-            ROS_ERROR("Failed to retrieve file: %s", e.what());
-            return false;
-        }
+//     resource_retriever::MemoryResource resource;
+//     for(auto object : req.objects){
+//         try {
+//             resource = r.get(object.object); 
+//         } catch (resource_retriever::Exception& e) {
+//             ROS_ERROR("Failed to retrieve file: %s", e.what());
+//             return false;
+//         }
 
-        uint8_t* r_data = resource.data.get();
-        TriangleMesh2* triangleObject = parse_stl(resource.data.get(), resource.size);
+//         uint8_t* r_data = resource.data.get();
+//         TriangleMesh2* triangleObject = parse_stl(resource.data.get(), resource.size);
 
-        Vec3f offset;
-        Vec3f scale;
-        tf::pointMsgToTF(object.pose.position, offset);
-        tf::vector3MsgToTF(object.scale, scale);
-        triangleObject->setOffset(offset);
-        triangleObject->setScale(scale);
+//         Vec3f offset;
+//         Vec3f scale;
+//         tf::pointMsgToTF(object.pose.position, offset);
+//         tf::vector3MsgToTF(object.scale, scale);
+//         triangleObject->setOffset(offset);
+//         triangleObject->setScale(scale);
 
-        objects.push_back(std::unique_ptr<Object>(triangleObject));
-    }
+//         objects.push_back(std::unique_ptr<Object>(triangleObject));
+//     }
 
 
-    auto pointList = render(options, objects);
-    ROS_INFO("NmbrPoints: %d", pointList.size());
+//     auto pointList = render(options, objects);
+//     ROS_INFO("NmbrPoints: %d", pointList.size());
 
-    visualization_msgs::Marker cloud;
-    cloud.header.frame_id = "origin";
-    cloud.type = visualization_msgs::Marker::POINTS;
-    cloud.scale.x = 0.01;
-    cloud.scale.y = 0.01;
-    cloud.scale.z = 0.01;
-    cloud.color.a = 1;
-    cloud.color.r = 1;
-    cloud.color.g = 0;
-    cloud.color.b = 0;
+//     visualization_msgs::Marker cloud;
+//     cloud.header.frame_id = "origin";
+//     cloud.type = visualization_msgs::Marker::POINTS;
+//     cloud.scale.x = 0.01;
+//     cloud.scale.y = 0.01;
+//     cloud.scale.z = 0.01;
+//     cloud.color.a = 1;
+//     cloud.color.r = 1;
+//     cloud.color.g = 0;
+//     cloud.color.b = 0;
 
-    std::vector<geometry_msgs::Point> cloud_points;
-    for(uint32_t i = 0; i < pointList.size(); i++){
-        geometry_msgs::Point tmp;
-        tmp.x = pointList[i].x();
-        tmp.y = -pointList[i].z();
-        tmp.z = pointList[i].y();
+//     std::vector<geometry_msgs::Point> cloud_points;
+//     for(uint32_t i = 0; i < pointList.size(); i++){
+//         geometry_msgs::Point tmp;
+//         tmp.x = pointList[i].x();
+//         tmp.y = -pointList[i].z();
+//         tmp.z = pointList[i].y();
 
-        cloud_points.push_back(tmp);
-    }
+//         cloud_points.push_back(tmp);
+//     }
 
-    cloud.points = cloud_points;
+//     cloud.points = cloud_points;
 
-    cloudPub.publish(cloud);
+//     cloudPub.publish(cloud);
 
-    res.cloud = cloud;
+//     res.cloud = cloud;
     
-    return true;
-}
+//     return true;
+// }
 
-void saveToFile(std::vector<Vec3f> pointList){
-    // save pointcloud to file
-    std::ofstream ofs;
-    ofs.open("plc_out.ply");
-    ofs << "ply\n"
-     << "format ascii 1.0\n"
-     << "element vertex " << pointList.size() <<"\n"
-     << "property float32 x\n"
-     << "property float32 y\n"
-     << "property float32 z\n"
-     << "end_header\n";
+// void saveToFile(std::vector<Vec3f> pointList){
+//     // save pointcloud to file
+//     std::ofstream ofs;
+//     ofs.open("plc_out.ply");
+//     ofs << "ply\n"
+//      << "format ascii 1.0\n"
+//      << "element vertex " << pointList.size() <<"\n"
+//      << "property float32 x\n"
+//      << "property float32 y\n"
+//      << "property float32 z\n"
+//      << "end_header\n";
 
-    for (uint32_t i = 0; i < pointList.size(); ++i) {
-        ofs << pointList[i].x() << " " << pointList[i].y()  << " " << pointList[i].z() << std::endl;
-    }
+//     for (uint32_t i = 0; i < pointList.size(); ++i) {
+//         ofs << pointList[i].x() << " " << pointList[i].y()  << " " << pointList[i].z() << std::endl;
+//     }
 
-    ofs.close();
-}
+//     ofs.close();
+// }
 
 int main(int argc, char **argv) {
-    ros::init(argc, argv, "lidarSimulator");
-    ros::NodeHandle nh;
-    cloudPub = nh.advertise<visualization_msgs::Marker>("/simMarker", 1);
+    // ros::init(argc, argv, "lidarSimulator");
+    // ros::NodeHandle nh;
+    // cloudPub = nh.advertise<visualization_msgs::Marker>("/simMarker", 1);
 
+    // ros::ServiceServer service = nh.advertiseService("lidarSimulatorService", simulate);
 
-    ros::ServiceServer service = nh.advertiseService("lidarSimulatorService", simulate);
+    //get all platforms (drivers)
+    std::vector<cl::Platform> all_platforms;
+    cl::Platform::get(&all_platforms);
+    if(all_platforms.size() == 0){
+        std::cout << " No platforms found. Check OpenCL installation!" << std::endl;
+        exit(1);
+    }
 
-    ros::spin();
+    cl::Platform default_platform = all_platforms[0];
+    std::cout << "Using platform: " << default_platform.getInfo<CL_PLATFORM_NAME>() << std::endl;
+
+    //get default device of the default platform
+    std::vector<cl::Device> all_devices;
+    default_platform.getDevices(CL_DEVICE_TYPE_ALL, &all_devices);
+    if(all_devices.size() == 0){
+        std::cout<<" No devices found. Check OpenCL installation!" << std::endl;
+        exit(1);
+    }
+
+    cl::Device default_device = all_devices[0];
+    std::cout << "Using device: " << default_device.getInfo<CL_DEVICE_NAME>() << std::endl;
+    std::cout << "Maximum items per workgroup: " << default_device.getInfo<CL_DEVICE_MAX_WORK_GROUP_SIZE>() << std::endl;
+
+    cl::Context context({default_device});
+    cl::Program::Sources sources;
+
+    std::ifstream sourceFile("src/kernel.cl");
+    std::string kernel_code( std::istreambuf_iterator<char>(sourceFile), (std::istreambuf_iterator<char>()));
+
+    sources.push_back({kernel_code.c_str(), kernel_code.length()});
+
+    cl::Program program(context, sources);
+    if(program.build({default_device}) != CL_SUCCESS){
+        std::cout << " Error building: " << program.getBuildInfo<CL_PROGRAM_BUILD_LOG>(default_device) << std::endl;
+        exit(1);
+    }
+
+    TriangleMesh2* object = parse_stl(std::string("qube.stl"));
+    object->setScale(Vec3f{0.01, 0.01, 0.01});
+    object->setOffset(Vec3f{0, 0, 3});
+
+    // for(int i=0; i<object->triangles.size(); i++){
+    //     auto v = object->triangles[i].v1;
+    //     std::cout << "X: " << v.x << "Y: " << v.y << "Z: " << v.z << std::endl;
+    //     v = object->triangles[i].v2;
+    //     std::cout << "X: " << v.x << "Y: " << v.y << "Z: " << v.z << std::endl;
+    //     v = object->triangles[i].v3;
+    //     std::cout << "X: " << v.x << "Y: " << v.y << "Z: " << v.z << std::endl;
+    //     std::cout << std::endl;
+    // }
+
+    int numberWorkers = object->triangles.size();
+    // int numberWorkers = 1;
+    Triangle testtri = {
+        {0, 0, 0},
+        {-1, -1, 2},
+        {1, 1, 2},
+        {1, -1, 2}
+    };
+    ray testray = {
+               Vec3f{0, 0, 0},
+               Vec3f{0, 0, 1}
+               };
+
+    // create buffers on the device
+    cl::Buffer buffer_tris(context, CL_MEM_READ_WRITE, sizeof(Triangle)*numberWorkers);
+    cl::Buffer buffer_ray(context, CL_MEM_READ_WRITE, sizeof(ray));
+    cl::Buffer buffer_distances(context, CL_MEM_READ_WRITE, sizeof(double)*numberWorkers);
+    // cl::Buffer buffer_distances(context, CL_MEM_READ_WRITE, sizeof(Triangle)*numberWorkers);
+
+    //create queue to which we will push commands for the device.
+    cl::CommandQueue queue(context, default_device);
+
+    //write arrays tris and ray to the device
+    queue.enqueueWriteBuffer(buffer_tris,  CL_TRUE, 0, sizeof(Triangle)*numberWorkers, &(object->triangles[0]));
+    // queue.enqueueWriteBuffer(buffer_tris,  CL_TRUE, 0, sizeof(Triangle)*numberWorkers, &testtri);
+    queue.enqueueWriteBuffer(buffer_ray,  CL_TRUE, 0, sizeof(ray), &testray);
+
+    //run the kernel
+    cl::Kernel kernel_intersect = cl::Kernel(program, "rayTriangleIntersect");
+    kernel_intersect.setArg(0, buffer_tris);
+    kernel_intersect.setArg(1, buffer_ray);
+    kernel_intersect.setArg(2, buffer_distances);
+
+    //Nullrange for workergroup size means the driver will calculate the "best" workgroup size
+    queue.enqueueNDRangeKernel(kernel_intersect, cl::NullRange, cl::NDRange(numberWorkers), cl::NullRange);
+    queue.finish();
+
+    //get result from device to host
+    double *distances = new double[numberWorkers];
+    queue.enqueueReadBuffer(buffer_distances, CL_TRUE, 0, sizeof(double)*numberWorkers, distances);
+    for(int i=0; i<numberWorkers; i++){
+        std::cout << distances[i] << std::endl;
+    }
+
+    // Triangle *distances = new Triangle[numberWorkers];
+    // queue.enqueueReadBuffer(buffer_distances, CL_TRUE, 0, sizeof(Triangle)*numberWorkers, distances);
+    // for(int i=0; i<numberWorkers; i++){
+    //     auto v = distances[i].v1;
+    //     std::cout << "X: " << v.x << "Y: " << v.y << "Z: " << v.z << std::endl;
+    //     v = distances[i].v2;
+    //     std::cout << "X: " << v.x << "Y: " << v.y << "Z: " << v.z << std::endl;
+    //     v = distances[i].v3;
+    //     std::cout << "X: " << v.x << "Y: " << v.y << "Z: " << v.z << std::endl;
+    //     std::cout << std::endl;
+    // }
+
+    // ros::spin();
 
     return 0;
 }
