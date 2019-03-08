@@ -613,10 +613,11 @@ int main(int argc, char **argv) {
     queue.enqueueWriteBuffer(buffer_number_tris,  CL_TRUE, 0, sizeof(int), &numberTris);
 
     //run both kernels
-    queue.enqueueNDRangeKernel(kernel_intersect, cl::NullRange, cl::NDRange(numberTris, numberRays), cl::NullRange);
+    // queue.enqueueNDRangeKernel(kernel_intersect, cl::NullRange, cl::NDRange(numberTris, numberRays), cl::NullRange);
+    queue.enqueueNDRangeKernel(kernel_intersect, cl::NullRange, cl::NDRange(numberTris, numberRays), cl::NDRange(1, 16));
     queue.finish();
 
-    queue.enqueueNDRangeKernel(kernel_filter, cl::NullRange, cl::NDRange(numberRays), cl::NullRange);
+    queue.enqueueNDRangeKernel(kernel_filter, cl::NullRange, cl::NDRange(numberRays), cl::NDRange(16));
     queue.finish();
 
     //get result from device to host
