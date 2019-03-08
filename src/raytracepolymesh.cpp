@@ -527,9 +527,8 @@ int main(int argc, char **argv) {
 
     sources.push_back({kernel_code.c_str(), kernel_code.length()});
 
-
     cl::Program program(context, sources);
-    if(program.build({default_device}) != CL_SUCCESS){
+    if(program.build({default_device}, "-cl-denorms-are-zero -cl-single-precision-constant -cl-no-signed-zeros -cl-unsafe-math-optimizations -cl-mad-enable -cl-finite-math-only -cl-fast-relaxed-math") != CL_SUCCESS){
         std::cout << " Error building: " << program.getBuildInfo<CL_PROGRAM_BUILD_LOG>(default_device) << std::endl;
         exit(1);
     }
@@ -584,50 +583,58 @@ int main(int argc, char **argv) {
 
     // create buffers on the device
     cl::Buffer buffer_tris(context, CL_MEM_READ_ONLY, sizeof(Triangle)*numberTris);
-    // cl::Buffer buffer_ray(context, CL_MEM_READ_WRITE, sizeof(ray));
     cl::Buffer buffer_ray(context, CL_MEM_READ_ONLY, sizeof(ray)*numberRays);
-    cl::Buffer buffer_distances(context, CL_MEM_READ_WRITE, sizeof(double)*numberTris*numberRays);
+    cl::Buffer buffer_distances(context, CL_MEM_READ_WRITE, sizeof(float)*numberTris*numberRays);
 
-    //create queue to which we will push commands for the device.
-    cl::CommandQueue queue(context, default_device);
+    cl::Buffer buffer_number_tris(context, CL_MEM_READ_ONLY, sizeof(int));
+    cl::Buffer buffer_shortest_dist(context, CL_MEM_READ_WRITE, sizeof(float)*numberRays);
 
-    //write arrays tris and ray to the device
-    queue.enqueueWriteBuffer(buffer_tris,  CL_TRUE, 0, sizeof(Triangle)*numberTris, &(object->triangles[0]));
-    // queue.enqueueWriteBuffer(buffer_ray,  CL_TRUE, 0, sizeof(ray), &testray);
-    queue.enqueueWriteBuffer(buffer_ray,  CL_TRUE, 0, sizeof(ray)*numberRays, &testrays[0]);
-
-    //run the kernel
+    //build the intersect kernel
     cl::Kernel kernel_intersect = cl::Kernel(program, "rayTriangleIntersect");
     kernel_intersect.setArg(0, buffer_tris);
     kernel_intersect.setArg(1, buffer_ray);
     kernel_intersect.setArg(2, buffer_distances);
 
-    //Nullrange for workergroup size means the driver will calculate the "best" workgroup size
-    // queue.enqueueNDRangeKernel(kernel_intersect, cl::NullRange, cl::NDRange(numberTris), cl::NullRange);
-    queue.enqueueNDRangeKernel(kernel_intersect, cl::NullRange, cl::NDRange(numberTris, numberRays), cl::NullRange);
-    queue.finish();
+    //build the filter kernel
+    cl::Kernel kernel_filter = cl::Kernel(program, "filterShortestDistance");
+    kernel_filter.setArg(0, buffer_distances);
+    kernel_filter.setArg(1, buffer_number_tris);
+    kernel_filter.setArg(2, buffer_shortest_dist);
+
+    //create queue to which we will push commands for the device.
+    cl::CommandQueue queue(context, default_device);
 
     auto timeStart = std::chrono::high_resolution_clock::now();
 
+    //write arrays tris and ray to the device
+    queue.enqueueWriteBuffer(buffer_tris,  CL_TRUE, 0, sizeof(Triangle)*numberTris, &(object->triangles[0]));
+    queue.enqueueWriteBuffer(buffer_ray,  CL_TRUE, 0, sizeof(ray)*numberRays, &testrays[0]);
+
+    queue.enqueueWriteBuffer(buffer_number_tris,  CL_TRUE, 0, sizeof(int), &numberTris);
+
+    //run both kernels
+    queue.enqueueNDRangeKernel(kernel_intersect, cl::NullRange, cl::NDRange(numberTris, numberRays), cl::NullRange);
+    queue.finish();
+
+    queue.enqueueNDRangeKernel(kernel_filter, cl::NullRange, cl::NDRange(numberRays), cl::NullRange);
+    queue.finish();
+
     //get result from device to host
-    double *distances = new double[numberTris*numberRays];
-    queue.enqueueReadBuffer(buffer_distances, CL_TRUE, 0, sizeof(double)*numberTris*numberRays, distances);
+    float *distances = new float[numberTris*numberRays];
+    queue.enqueueReadBuffer(buffer_shortest_dist, CL_TRUE, 0, sizeof(float)*numberRays, distances);
 
     auto timeEnd = std::chrono::high_resolution_clock::now();
-    auto passedTime = std::chrono::duration<double, std::milli>(timeEnd - timeStart).count();
-    fprintf(stderr, "\rDone: %.2f (sec)\n", passedTime / 1000);
+    auto passedTime = std::chrono::duration<double, std::micro>(timeEnd - timeStart).count();
+    fprintf(stderr, "\rDone: %.5f (sec)\n", passedTime / 1000000);
 
+    //output the results to a pointcloud
     std::vector<Vec3f> pointList;
-    for(int i=0; i<numberTris; i++){
-        for(int j=0; j<numberRays; j++){
-            // std::cout << distances[i] << std::endl;
-            double dist = distances[i*numberRays + j];
-            if(dist > 0){
-                // std::cout << dist << std::endl;
-                ray the_ray = testrays[j];
-                Vec3f hitPoint = vecMulScalar(vecAddVec(the_ray.origin, the_ray.dir), dist);
-                pointList.push_back(hitPoint);
-            }
+    for(int j=0; j<numberRays; j++){
+        float dist = distances[j];
+        if(!std::isnan(dist) && !std::isinf(dist)){
+            ray the_ray = testrays[j];
+            Vec3f hitPoint = vecMulScalar(vecAddVec(the_ray.origin, the_ray.dir), dist);
+            pointList.push_back(hitPoint);
         }
     }
 
